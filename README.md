@@ -1,61 +1,40 @@
-# NEXUS AI — browser-agent starter
+# NEXUS AI v0.5 — browser research agent
 
-A mobile-friendly dashboard + FastAPI + Playwright + Groq starter. The dashboard and API run together as one Render service, so you do **not** need Vercel for the first version.
+A mobile-friendly dashboard + FastAPI + Playwright + Groq starter. The dashboard and API run together as one Render service.
 
-## What this starter can do
-- Accept a starting URL and a plain-language research task.
-- Run a visible-to-the-server Chromium browser using Playwright.
-- Show live browser screenshots and activity logs in the dashboard.
-- Let Groq choose from a small, allow-listed set of browser tools.
-- Check each action against the resulting URL/page state.
-- Keep a task/action ID and basic integrity hash in the event log.
-- Stop a running task.
+## What this build can do
+- Accept a task and optional starting URL.
+- Open public HTTP/HTTPS pages and search the public web.
+- Extract page text, links, video links and image URLs separately.
+- Use a small allow-list of DOM-based browser actions: click one uniquely matched visible button/link, scroll, wait and inspect.
+- Verify action outcomes and show green/amber/red activity logs.
+- Stream a remote Chromium screenshot preview while the Browser tab is open.
+- Stop a running task and expose `/health` for Render health checks.
 
-## Important limitations
-- "Live browser" is streamed as screenshots from the remote browser, not a full interactive remote desktop.
-- This is a starter, not a fully autonomous production agent.
-- The inspector is a deterministic Python check plus Groq's task reasoning; neither guarantees correctness.
-- The browser is restricted to ordinary browsing/search/research actions. It will not submit forms, purchase items, enter passwords, bypass logins/CAPTCHAs, or perform sensitive account actions.
-- Use only websites you are allowed to access. Respect site terms and robots/access restrictions.
-- Render free instances may sleep and have limited resources. Browser automation may need a paid instance for reliable longer runs.
+## Important safety and reliability limits
+- Clicks are attempted only when a visible button/link resolves uniquely by accessible name. Ambiguous matches are not clicked.
+- Sensitive controls (for example purchase, payment, account, posting or deletion controls) are skipped.
+- NEXUS does not enter passwords, submit general forms, make purchases, bypass CAPTCHAs/paywalls/logins, or evade site access restrictions.
+- Use only sites you are allowed to access and respect their terms.
+- Screenshots are a preview, not an interactive remote desktop. Some sites block automation or image hotlinking.
+- Render free instances may sleep and have limited CPU/RAM; long tasks may be interrupted.
+- Groq API usage may incur limits or costs according to your provider account.
 
-## Deploy from an Android phone
+## Deploy on Render
+1. Push the project files to a GitHub repository.
+2. In Render, create a Docker Web Service or use the included `render.yaml` Blueprint.
+3. Set `GROQ_API_KEY` as a Render environment variable. Never put the key in frontend code or commit it to GitHub.
+4. Deploy and wait until the service is Live.
+5. Open the Render service URL. `/health` should return a healthy status.
 
-### 1. Get the project into GitHub
-1. Download `nexus-ai-starter.zip`.
-2. Open GitHub in your mobile browser and create a **new empty repository** named `nexus-ai`.
-3. Open the repository, choose **Add file → Upload files** (or the upload icon/menu).
-4. Upload the ZIP only if GitHub offers file upload for it; otherwise extract the ZIP using your phone's Files app and upload the extracted files/folders. GitHub's web UI can be awkward on mobile, so use the browser's desktop-site option if needed.
-5. Commit the files to the `main` branch.
+The default model is set by `GROQ_MODEL` in the environment; the current fallback is `openai/gpt-oss-120b`.
 
-### 2. Deploy on Render
-1. Sign in to Render and choose **New → Blueprint** (or **New → Web Service**).
-2. Connect GitHub and select `nexus-ai`.
-3. If using Blueprint, Render reads `render.yaml`. If using Web Service, select **Docker** as the runtime.
-4. Add environment variable `GROQ_API_KEY` with your own key. Keep it secret; never put it in frontend files or GitHub.
-5. Deploy and wait for the service to become Live.
-6. Open the Render URL. The dashboard is served by the same service.
-
-### 3. Get a Groq API key
-Create a key in the Groq Console and add it to Render's environment variables as `GROQ_API_KEY`. Do not share it in chat or commit it to GitHub.
-
-## Run locally (optional)
+## Run locally
 ```bash
 python -m venv .venv
 pip install -r requirements.txt
 playwright install chromium
-cp .env.example .env
-# Add GROQ_API_KEY to .env
+# Set GROQ_API_KEY in your environment
 uvicorn app.main:app --reload
 ```
 Open http://127.0.0.1:8000
-
-## Current tools
-- `open_url`: navigate to an HTTP/HTTPS page
-- `click_text`: click a visible link/button by its text
-- `fill_search`: fill a visible search input
-- `press_enter`: submit a search query by pressing Enter in the search field
-- `scroll_page`: scroll the page
-- `inspect_page`: read URL, title, visible text and links
-
-The agent asks for approval before any action outside this limited tool set. Add more tools only with explicit validation and safeguards.
