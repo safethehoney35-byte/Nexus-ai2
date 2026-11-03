@@ -192,3 +192,8 @@ async def serve_nexus_bypass(request: Request):
     </html>
     """
     return HTMLResponse(content=html_content, status_code=200)
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 10000))
+    uvicorn.run("app.main:app", host="0.0.0.0", port=port)
