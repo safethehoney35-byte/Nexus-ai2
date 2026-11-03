@@ -2,76 +2,133 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>NEXUS AI</title>
+<title>NEXUS AI v0.4</title>
 <style>
 *{box-sizing:border-box}body{margin:0;background:#080b12;color:#edf1fa;font-family:Inter,Arial,sans-serif}
-header{height:65px;border-bottom:1px solid #202737;display:flex;align-items:center;justify-content:space-between;padding:0 22px}
+header{min-height:65px;border-bottom:1px solid #202737;display:flex;align-items:center;justify-content:space-between;padding:0 22px}
 .logo{font-size:21px;font-weight:800;letter-spacing:2px}.logo span{color:#72a7ff}.connection{font-size:12px;color:#59dca3}
 nav{display:flex;gap:8px;padding:15px 22px;border-bottom:1px solid #202737;overflow-x:auto}
-nav button{background:#121a29;color:#aab5c9;border:1px solid #26344a;padding:10px 16px;border-radius:8px;white-space:nowrap}
+nav button{background:#121a29;color:#aab5c9;border:1px solid #26344a;padding:10px 16px;border-radius:8px;white-space:nowrap;cursor:pointer}
 nav button.active{background:#1c3155;color:white;border-color:#538bdf}
 main{max-width:1250px;margin:auto;padding:22px}.panel{background:#101725;border:1px solid #202d41;border-radius:13px;padding:19px;margin-bottom:17px}
 h2{font-size:17px;margin-top:0}small,.muted{color:#8192ad}
 textarea,input{width:100%;background:#080e19;border:1px solid #293951;color:white;border-radius:8px;padding:13px;margin-bottom:10px;font-size:14px}
-textarea{min-height:95px;resize:vertical}.primary,.stop{color:white;border:0;padding:12px 20px;border-radius:8px;font-weight:700}
+textarea{min-height:95px;resize:vertical}.primary,.stop{color:white;border:0;padding:12px 20px;border-radius:8px;font-weight:700;cursor:pointer}
 .primary{background:#397be0}.stop{background:#a83f50}
 .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.metric{background:#0a1220;border:1px solid #26344b;border-radius:9px;padding:14px}
 .metric strong{font-size:23px;display:block;margin-top:7px}.progress{height:7px;background:#202c40;border-radius:10px;overflow:hidden;margin-top:13px}
 .progress div{height:100%;width:0;background:#5b9cff;transition:width .3s}.activity{max-height:420px;overflow-y:auto}
-.event{display:flex;gap:12px;border-bottom:1px solid #1d293a;padding:12px 0;font-size:13px}.event time{color:#8295b2;min-width:65px}
-.tag{color:#76a9ff;min-width:95px;font-size:11px}.event-message{overflow-wrap:anywhere}
+.event{display:flex;gap:12px;border-bottom:1px solid #1d293a;padding:11px 0;font-size:13px;align-items:flex-start}.event time{color:#8295b2;min-width:65px}
+.tag{min-width:95px;font-size:11px}.event-message{overflow-wrap:anywhere;flex:1}
+.ok{color:#43df91}.bad{color:#ff6577}.warn{color:#f4c76b}.run{color:#72a7ff}
 .source{background:#0a1220;padding:13px;border:1px solid #25344b;border-radius:9px;margin-bottom:9px}
-.source a{color:#80b1ff;text-decoration:none;font-weight:600;overflow-wrap:anywhere}.source small{display:block;margin-top:7px;overflow-wrap:anywhere}
+.source a,.image-card a{color:#80b1ff;text-decoration:none;font-weight:600;overflow-wrap:anywhere}
+.source small{display:block;margin-top:7px;overflow-wrap:anywhere}
 #browserImage{width:100%;border-radius:9px;background:#05080e;min-height:180px;object-fit:contain}
 .report{white-space:pre-wrap;line-height:1.7;font-size:14px;overflow-wrap:anywhere}.hidden{display:none}
+.image-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+.image-card{background:#0a1220;border:1px solid #25344b;border-radius:9px;padding:9px;min-width:0}
+.image-card img{width:100%;height:105px;object-fit:contain;background:#05080e;border-radius:6px}
+.image-card small{display:block;overflow-wrap:anywhere;margin-top:7px}
+.badge{display:inline-block;border-radius:20px;padding:4px 9px;font-size:11px;background:#14251e;color:#43df91}
+.diagnostic{font-size:13px;line-height:1.7;overflow-wrap:anywhere}
+.bottom-report{border:1px solid #236b4c;background:linear-gradient(145deg,#0b2119,#101725);box-shadow:0 0 25px #1b8c5520}
 @media(max-width:750px){.grid{grid-template-columns:repeat(2,1fr)}main{padding:13px}.tag{min-width:75px}}
 </style></head>
 <body>
-<header><div class="logo">NEXUS<span> AI</span></div><div class="connection" id="connection">● CONNECTING</div></header>
-<nav><button class="active" onclick="setLayer(1,this)">Overview</button><button onclick="setLayer(2,this)">Sources & Details</button><button onclick="setLayer(3,this)">Browser</button></nav>
+<header><div class="logo">NEXUS<span> AI</span> <small>v0.4</small></div><div class="connection" id="connection">● CONNECTING</div></header>
+<nav>
+<button class="active" onclick="setLayer(1,this)">Overview</button>
+<button onclick="setLayer(2,this)">Research & Sources</button>
+<button onclick="setLayer(3,this)">Browser</button>
+<button onclick="setLayer(4,this)">Images</button>
+<button onclick="setLayer(5,this)">Actions & Diagnostics</button>
+</nav>
 <main>
 <section id="overview">
-<div class="panel"><h2>Research Command</h2><textarea id="task" placeholder="Tell NEXUS what you want it to do..."></textarea>
-<input id="startUrl" placeholder="Optional starting website URL (https://...)">
+<div class="panel"><h2>Research Command</h2>
+<textarea id="task" placeholder="Example: Open YouTube and search for science documentaries"></textarea>
+<input id="startUrl" placeholder="Starting website URL (example: https://www.youtube.com) — optional">
 <button class="primary" onclick="startTask()">START NEXUS</button> <button class="stop" onclick="stopTask()">STOP</button>
 <p class="muted" id="statusText">Waiting for instruction.</p></div>
 <div class="panel"><h2>Live Progress</h2><div class="grid">
-<div class="metric"><small>COLLECTED</small><strong id="collected">0</strong></div><div class="metric"><small>ANALYSED</small><strong id="analysed">0</strong></div>
-<div class="metric"><small>TARGET</small><strong id="target">12</strong></div><div class="metric"><small>STATUS</small><strong id="status">IDLE</strong></div></div>
+<div class="metric"><small>COLLECTED</small><strong id="collected">0</strong></div>
+<div class="metric"><small>ANALYSED</small><strong id="analysed">0</strong></div>
+<div class="metric"><small>TARGET</small><strong id="target">12</strong></div>
+<div class="metric"><small>STATUS</small><strong id="status">IDLE</strong></div></div>
 <div class="progress"><div id="progressBar"></div></div></div>
 <div class="panel"><h2>Current Action</h2><div id="currentAction">Waiting for NEXUS...</div><p class="muted" id="currentUrl"></p></div>
 <div class="panel"><h2>Live Activity</h2><div class="activity" id="activity"><p class="muted">No activity yet.</p></div></div>
-<div class="panel"><h2>Final Report</h2><div class="report" id="report">Your report will appear here.</div></div>
 </section>
+
 <section id="details" class="hidden">
 <div class="panel"><h2>Research Plan</h2><pre id="planList" class="muted">No plan yet.</pre></div>
-<div class="panel"><h2>Discovered Sources</h2><div id="sources">No sources collected yet.</div></div>
-<div class="panel"><h2>System State</h2><pre id="rawState" class="muted"></pre></div>
+<div class="panel"><h2>Discovered Sources — clickable original pages</h2><div id="sources">No sources collected yet.</div></div>
+<div class="panel"><h2>Research Report</h2><div class="report" id="report">Your report will appear here.</div></div>
 </section>
+
 <section id="browser" class="hidden">
-<div class="panel"><h2>Remote Chromium</h2><p class="muted">Preview refreshes periodically while this tab is open.</p><img id="browserImage" alt="Browser preview"></div>
+<div class="panel"><h2>Remote Chromium</h2><p class="muted">Live preview is refreshed only while this tab is open. Text extraction does not wait for images.</p>
+<img id="browserImage" alt="Browser preview"></div>
 <div class="panel"><h2>Browser Information</h2><p id="browserUrl">No active page.</p><p id="browserTitle"></p></div>
-</section></main>
+</section>
+
+<section id="images" class="hidden">
+<div class="panel"><h2>Separate Visual Results</h2><p class="muted">Images are collected separately from text research. In this build, the browser blocks image downloads for speed but extracts image URLs and metadata where available. Previews load independently in this dashboard.</p>
+<div id="imageStatus" class="muted">No image URLs extracted yet.</div><div class="image-grid" id="imageGrid"></div></div>
+</section>
+
+<section id="diagnostics" class="hidden">
+<div class="panel"><h2>Action Verification</h2><p class="muted">Green means the action completed; red means it failed; amber means it was attempted but could not be confirmed.</p>
+<div id="actionSummary" class="diagnostic">No actions yet.</div><div class="activity" id="actionLog"></div></div>
+<div class="panel"><h2>Connectivity Diagnostics</h2><div id="networkInfo" class="diagnostic">Not tested yet.</div></div>
+</section>
+
+<section class="panel bottom-report">
+<h2>🟢 WHAT NEXUS ACTUALLY DID & FOUND</h2>
+<div class="grid">
+<div><small>SUCCESSFUL ACTIONS</small><strong class="ok" id="successCount">0</strong></div>
+<div><small>FAILED ACTIONS</small><strong class="bad" id="failedCount">0</strong></div>
+<div><small>WARNING / UNVERIFIED</small><strong class="warn" id="warningCount">0</strong></div>
+<div><small>IMAGE URLS</small><strong id="imageCount">0</strong></div>
+</div>
+<p id="bottomStatus" class="muted">Waiting for a task.</p>
+<div id="bottomFindings" class="report">Final findings and clickable source links will appear here.</div>
+</section>
+</main>
 <script>
-const $=id=>document.getElementById(id);let socket=null,currentLayer=1;
+const $=id=>document.getElementById(id);let socket=null,currentLayer=1,lastState={};
+const sections={1:"overview",2:"details",3:"browser",4:"images",5:"diagnostics"};
 function setLayer(n,b){currentLayer=n;document.querySelectorAll("nav button").forEach(x=>x.classList.remove("active"));if(b)b.classList.add("active");
-$("overview").classList.toggle("hidden",n!==1);$("details").classList.toggle("hidden",n!==2);$("browser").classList.toggle("hidden",n!==3);
+Object.entries(sections).forEach(([k,id])=>$(id).classList.toggle("hidden",Number(k)!==n));
 if(socket&&socket.readyState===1)socket.send(JSON.stringify({type:"layer",layer:n}));}
 async function startTask(){const task=$("task").value.trim(),start_url=$("startUrl").value.trim();if(!task){alert("Enter a task first.");return}
 $("statusText").textContent="Starting NEXUS...";try{const r=await fetch("/api/start",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({task,start_url})});
 const d=await r.json();if(!r.ok)throw Error(d.error||"Could not start");$("statusText").textContent="NEXUS started."}catch(e){$("statusText").textContent=e.message}}
 async function stopTask(){try{await fetch("/api/stop",{method:"POST"})}catch(e){console.error(e)}}
 function esc(v){return String(v||"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;")}
-function renderState(s){$("collected").textContent=s.collected??0;$("analysed").textContent=s.analysed??0;$("target").textContent=s.target??12;$("status").textContent=(s.status||"idle").toUpperCase();
-$("progressBar").style.width+(s.target?Math.min(100,(s.collected||0)/s.target*100):0)+"%";
+function statusClass(s){s=(s||"").toLowerCase();return s==="success"||s==="collected"||s==="analysed"?"ok":s==="failed"||s==="error"?"bad":s==="warning"||s==="warn"?"warn":"run"}
+function renderState(s){lastState=s;$("collected").textContent=s.collected??0;$("analysed").textContent=s.analysed??0;$("target").textContent=s.target??12;$("status").textContent=(s.status||"idle").toUpperCase();
 $("progressBar").style.width=(s.target?Math.min(100,(s.collected||0)/s.target*100):0)+"%";
 $("currentAction").textContent=s.action||"Waiting...";$("currentUrl").textContent=s.current_url||"";
 $("statusText").textContent=(s.phase||"Ready")+" · "+(s.status||"idle");$("browserUrl").textContent=s.current_url||"No active page";$("browserTitle").textContent=s.current_title||"";
-$("report").textContent=s.report||"Report not ready.";$("rawState").textContent=JSON.stringify(s,null,2);$("planList").textContent=s.plan?JSON.stringify(s.plan,null,2):"No plan yet.";
-const a=s.sources||[];$("sources").innerHTML=a.length?a.map(x=>`<div class="source"><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.title||"Untitled source")}</a><small>${esc(x.status)}</small><small>${esc(x.url)}</small></div>`).join(""):'<p class="muted">No sources collected yet.</p>'}
+$("planList").textContent=s.plan?JSON.stringify(s.plan,null,2):"No plan yet.";
+const a=s.sources||[];$("sources").innerHTML=a.length?a.map(x=>`<div class="source"><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.title||"Untitled source")}</a><small>${esc(x.status)}</small><small>${esc(x.url)}</small></div>`).join(""):'<p class="muted">No sources collected yet.</p>';
+const imgs=s.images||[];$("imageCount").textContent=imgs.length;$("imageStatus").textContent=imgs.length?`${imgs.length} image URL(s) extracted. Previews load separately and may depend on the source site's hotlink policy.`:"No image URLs extracted yet.";
+$("imageGrid").innerHTML=imgs.map(x=>`<div class="image-card"><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer"><img loading="lazy" src="${esc(x.url)}" alt="${esc(x.alt)}" onerror="this.style.opacity='.25';this.title='Preview unavailable; open original URL'"></a><small>${esc(x.alt||"Image")}</small><small>${esc(x.width)} × ${esc(x.height)}</small><small><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">Open original image ↗</a></small></div>`).join("");
+const acts=s.actions||[];const counts={success:0,failed:0,warning:0};acts.forEach(x=>{let st=(x.status||"").toLowerCase();if(st==="success")counts.success++;else if(st==="failed"||st==="error")counts.failed++;else if(st==="warning")counts.warning++;});
+$("successCount").textContent=counts.success;$("failedCount").textContent=counts.failed;$("warningCount").textContent=counts.warning;
+$("actionSummary").innerHTML=`<span class="ok">🟢 ${counts.success} successful</span> &nbsp; <span class="bad">🔴 ${counts.failed} failed</span> &nbsp; <span class="warn">🟡 ${counts.warning} unverified/warnings</span>`;
+$("actionLog").innerHTML=acts.slice().reverse().map(x=>`<div class="event"><time>${esc(x.time)}</time><span class="tag ${statusClass(x.status)}">${esc((x.status||"info").toUpperCase())}</span><span class="event-message">${esc(x.message)}</span></div>`).join("");
+const net=s.network||{};$("networkInfo").innerHTML=(net.checks||[]).map(c=>`<div class="${c.ok?'ok':'bad'}">${c.ok?'🟢':'🔴'} ${esc(c.host)} — ${c.ok?'reachable':'not reachable'} — ${esc(c.ms)} ms ${esc(c.error||'')}</div>`).join("")+`<p>${esc(net.note||"Connectivity check not run.")}</p>`;
+$("report").textContent=s.report||"Report not ready.";
+$("bottomStatus").textContent=`Status: ${(s.status||"idle").toUpperCase()} · Collected ${s.collected||0}/${s.target||0} · Analysed ${s.analysed||0} · Elapsed ${s.elapsed||0}s`;
+let findings=s.report||"No final report yet.";let links=a.map(x=>`<p><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.title||x.url)}</a></p>`).join("");
+$("bottomFindings").innerHTML=`<div class="report">${esc(findings)}</div><h3>Clickable original sources</h3>${links||'<span class="muted">No verified source links collected.</span>'}`;
+}
 function renderEvent(e){const box=$("activity");if(box.querySelector(".muted"))box.innerHTML="";const row=document.createElement("div");row.className="event";
-const t=document.createElement("time");t.textContent=e.time||"";const tag=document.createElement("span");tag.className="tag";tag.textContent=e.category||"INFO";
-const m=document.createElement("span");m.className="event-message";m.textContent=e.message||"";row.append(t,tag,m);box.prepend(row);while(box.children.length>100)box.lastElementChild.remove()}
+const t=document.createElement("time");t.textContent=e.time||"";const tag=document.createElement("span");tag.className="tag "+statusClass(e.status);tag.textContent=(e.status||e.category||"INFO").toUpperCase();
+const m=document.createElement("span");m.className="event-message";m.textContent=e.message||"";row.append(t,tag,m);box.prepend(row);while(box.children.length>120)box.lastElementChild.remove()}
 function connect(){const proto=location.protocol==="https:"?"wss:":"ws:";socket=new WebSocket(`${proto}//${location.host}/ws`);
 socket.onopen=()=>{$("connection").textContent="● CONNECTED";socket.send(JSON.stringify({type:"layer",layer:currentLayer}))};
 socket.onmessage=m=>{const d=JSON.parse(m.data);if(d.type==="state"){renderState(d.state);if(d.events){$("activity").innerHTML="";d.events.forEach(renderEvent)}}
@@ -80,564 +137,3 @@ socket.onclose=()=>{$("connection").textContent="● RECONNECTING";setTimeout(co
 async function refresh(){try{const r=await fetch("/api/status");const d=await r.json();renderState(d.state)}catch(e){}}
 connect();refresh();setInterval(refresh,3000);
 </script></body></html>
-"panel command">
-        <div class="label">COMMAND CENTRE / 01</div>
-
-        <h2>What should NEXUS research?</h2>
-
-        <p>
-            Define your research objective. NEXUS will plan the task,
-            collect public sources and analyse findings in batches.
-        </p>
-
-        <label class="input-label">RESEARCH OBJECTIVE</label>
-
-        <textarea id="taskInput"
-        placeholder="Example: Research the latest developments in artificial intelligence and compare major applications."></textarea>
-
-        <label class="input-label">OPTIONAL STARTING URL</label>
-
-        <input id="urlInput"
-        placeholder="https://example.com">
-
-        <div class="actions">
-            <button class="btn primary" id="startBtn" onclick="startTask()">
-                ▶ START RESEARCH
-            </button>
-
-            <button class="btn danger" id="stopBtn" onclick="stopTask()" disabled>
-                ■ STOP
-            </button>
-        </div>
-    </div>
-
-    <div class="panel status-card">
-
-        <div>
-            <div class="label">LIVE EXECUTION / 02</div>
-
-            <div class="status-main">
-                <div class="label">CURRENT STATUS</div>
-                <h2 id="statusText">Idle</h2>
-                <p id="actionText">Waiting for your research objective.</p>
-            </div>
-
-            <div class="label">RESEARCH PROGRESS</div>
-
-            <div class="progress-track">
-                <div class="progress-fill" id="progressFill"></div>
-            </div>
-
-            <div class="progress-meta">
-                <span id="progressText">0% completed</span>
-                <span id="progressCount">0 / 0</span>
-            </div>
-        </div>
-
-        <div class="metrics">
-            <div class="metric">
-                <strong id="collected">0</strong>
-                <span>SOURCES</span>
-            </div>
-
-            <div class="metric">
-                <strong id="analysed">0</strong>
-                <span>ANALYSED</span>
-            </div>
-
-            <div class="metric">
-                <strong id="target">0</strong>
-                <span>TARGET</span>
-            </div>
-        </div>
-    </div>
-
-</div>
-
-<div class="panel">
-    <div class="panel-title">
-        <h2>AGENT SYSTEM</h2>
-        <span class="label">EXECUTION STATUS</span>
-    </div>
-
-    <div class="workers">
-
-        <div class="worker">
-            <div class="worker-top">
-                <h3>01 · PLANNER</h3>
-                <span class="worker-status" id="plannerStatus">STANDBY</span>
-            </div>
-            <p>Creates the bounded research strategy and search queries.</p>
-        </div>
-
-        <div class="worker">
-            <div class="worker-top">
-                <h3>02 · COLLECTOR</h3>
-                <span class="worker-status" id="collectorStatus">STANDBY</span>
-            </div>
-            <p>Browses public sources and collects relevant information.</p>
-        </div>
-
-        <div class="worker">
-            <div class="worker-top">
-                <h3>03 · ANALYST</h3>
-                <span class="worker-status" id="analystStatus">STANDBY</span>
-            </div>
-            <p>Analyses collected information in batches and prepares findings.</p>
-        </div>
-
-    </div>
-</div>
-
-<div class="panel">
-    <div class="panel-title">
-        <h2>RESEARCH PLAN</h2>
-        <span class="label">GROQ GENERATED</span>
-    </div>
-
-    <div id="planList" class="plan-list">
-        <span class="empty">No plan generated yet.</span>
-    </div>
-</div>
-
-<div class="panel">
-    <div class="panel-title">
-        <h2>LIVE ACTIVITY</h2>
-        <span class="label">LATEST EVENTS</span>
-    </div>
-
-    <div class="activity" id="activity">
-        <div class="empty">System events will appear here.</div>
-    </div>
-</div>
-
-<div class="panel">
-    <div class="panel-title">
-        <h2>FINAL RESEARCH REPORT</h2>
-        <span class="label">AI ANALYSIS</span>
-    </div>
-
-    <div id="report" class="report empty">
-        Your completed research report will appear here.
-    </div>
-</div>
-
-</section>
-
-<!-- LAYER 2 -->
-
-<section class="layer" id="layer2">
-
-    <div class="panel">
-        <div class="panel-title">
-            <h2>EXECUTION DETAILS</h2>
-            <span class="label">LAYER 02</span>
-        </div>
-
-        <div class="diagnostic">
-            <div class="diag-box">
-                <div class="label">TASK ID</div>
-                <strong id="detailTaskId">—</strong>
-            </div>
-
-            <div class="diag-box">
-                <div class="label">EXECUTION PHASE</div>
-                <strong id="detailPhase">—</strong>
-            </div>
-
-            <div class="diag-box">
-                <div class="label">CURRENT URL</div>
-                <strong id="detailUrl">—</strong>
-            </div>
-
-            <div class="diag-box">
-                <div class="label">LAST ERROR</div>
-                <strong id="detailError">None</strong>
-            </div>
-        </div>
-    </div>
-
-    <div class="detail-grid">
-
-        <div class="panel">
-            <div class="panel-title">
-                <h2>EVENT STREAM</h2>
-                <span class="label">LIVE LOG</span>
-            </div>
-
-            <pre id="rawEvents">Waiting for events...</pre>
-        </div>
-
-        <div class="panel">
-            <div class="panel-title">
-                <h2>RAW SYSTEM STATE</h2>
-                <span class="label">JSON</span>
-            </div>
-
-            <pre id="rawState">Waiting for backend...</pre>
-        </div>
-
-    </div>
-
-    <div class="panel">
-        <div class="panel-title">
-            <h2>GENERATED SEARCH QUERIES</h2>
-            <span class="label">PLANNER OUTPUT</span>
-        </div>
-
-        <pre id="rawPlan">No plan available.</pre>
-    </div>
-
-</section>
-
-<!-- LAYER 3 -->
-
-<section class="layer" id="layer3">
-
-    <div class="panel">
-        <div class="panel-title">
-            <h2>REMOTE BROWSER</h2>
-            <span class="label">LIVE CHROMIUM VIEW</span>
-        </div>
-
-        <p class="empty">
-            Screenshots are requested only while this diagnostics layer is open.
-            The browser view may update every two seconds.
-        </p>
-
-        <div class="browser-frame">
-            <div class="browser-bar">
-                <span></span><span></span><span></span>
-                <div class="browser-url" id="browserUrl">Browser waiting...</div>
-            </div>
-
-            <img id="screenshot" alt="Remote browser screenshot">
-        </div>
-    </div>
-
-    <div class="panel">
-        <div class="panel-title">
-            <h2>DIAGNOSTIC INFORMATION</h2>
-            <span class="label">SYSTEM HEALTH</span>
-        </div>
-
-        <div class="diagnostic">
-
-            <div class="diag-box">
-                <div class="label">BACKEND CONNECTION</div>
-                <strong id="diagConnection">Checking...</strong>
-            </div>
-
-            <div class="diag-box">
-                <div class="label">BROWSER STATUS</div>
-                <strong id="diagBrowser">Waiting</strong>
-            </div>
-
-            <div class="diag-box">
-                <div class="label">CURRENT PHASE</div>
-                <strong id="diagPhase">Waiting</strong>
-            </div>
-
-            <div class="diag-box">
-                <div class="label">LAST ERROR</div>
-                <strong id="diagError">None</strong>
-            </div>
-
-        </div>
-    </div>
-
-</section>
-
-<footer>
-    NEXUS AI · RESEARCH PROTOTYPE · VERSION 0.2
-</footer>
-
-</div>
-
-<script>
-let socket;
-let currentLayer = 1;
-let currentState = {};
-let eventHistory = [];
-
-const $ = id => document.getElementById(id);
-
-function setConnection(online) {
-    $("connectionDot").className =
-        "dot " + (online ? "online" : "offline");
-
-    $("connectionText").textContent =
-        online ? "CONNECTED" : "DISCONNECTED";
-
-    $("diagConnection").textContent =
-        online ? "Online" : "Disconnected";
-}
-
-function addEvent(event) {
-    eventHistory.push(event);
-
-    if (eventHistory.length > 100) {
-        eventHistory.shift();
-    }
-
-    renderEvents();
-}
-
-function renderEvents() {
-    const box = $("activity");
-
-    if (!eventHistory.length) {
-        box.innerHTML = '<div class="empty">No events yet.</div>';
-        return;
-    }
-
-    box.innerHTML = eventHistory.slice(-30).reverse().map(e => `
-        <div class="event ${safe(e.kind)}">
-            <span class="event-time">${safe(e.time)}</span>
-            <span class="event-message">${safe(e.message)}</span>
-        </div>
-    `).join("");
-
-    $("rawEvents").textContent = eventHistory.map(e =>
-        `[${e.time}] [${e.kind}] ${e.message}`
-    ).join("\n");
-}
-
-function safe(value) {
-    return String(value ?? "").replace(/[&<>"']/g, char => ({
-        "&": "&amp;",
-        "<": "&lt;",
-        ">": "&gt;",
-        '"': "&quot;",
-        "'": "&#039;"
-    })[char]);
-}
-
-function renderState(s) {
-    currentState = s;
-
-    const running = s.status === "Running";
-
-    $("statusText").textContent = s.status || "Idle";
-    $("actionText").textContent =
-        s.current_action || "Waiting for a task.";
-
-    $("collected").textContent = s.collected ?? 0;
-    $("analysed").textContent = s.analysed ?? 0;
-    $("target").textContent = s.target ?? 0;
-
-    const target = Number(s.target || 0);
-    const collected = Number(s.collected || 0);
-
-    const percent = target
-        ? Math.min(100, Math.round(collected / target * 100))
-        : 0;
-
-    $("progressFill").style.width = percent + "%";
-    $("progressText").textContent = percent + "% collected";
-    $("progressCount").textContent = `${collected} / ${target}`;
-
-    $("startBtn").disabled = running;
-    $("stopBtn").disabled = !running;
-
-    $("detailTaskId").textContent = s.task_id || "—";
-    $("detailPhase").textContent = s.phase || "—";
-    $("detailUrl").textContent = s.current_url || "—";
-    $("detailError").textContent = s.last_error || "None";
-
-    $("browserUrl").textContent =
-        s.current_url || "Browser waiting...";
-
-    $("diagBrowser").textContent =
-        running ? "Active" : "Idle";
-
-    $("diagPhase").textContent = s.phase || "Waiting";
-    $("diagError").textContent = s.last_error || "None";
-
-    $("plannerStatus").textContent =
-        s.phase === "Planning" ? "WORKING" :
-        s.plan?.length ? "READY" : "STANDBY";
-
-    $("collectorStatus").textContent =
-        s.phase === "Collecting" ? "COLLECTING" :
-        s.collected > 0 ? "PAUSED / DONE" : "STANDBY";
-
-    $("analystStatus").textContent =
-        s.phase === "Analysing" || s.phase === "Final report"
-            ? "ANALYSING"
-            : s.analysed > 0 ? "BATCHES DONE" : "STANDBY";
-
-    $("rawState").textContent = JSON.stringify(s, null, 2);
-    $("rawPlan").textContent =
-        JSON.stringify(s.plan || [], null, 2);
-
-    const report = s.report || "";
-
-    $("report").textContent =
-        report || "Your completed research report will appear here.";
-
-    $("report").classList.toggle("empty", !report);
-
-    if (s.status === "Completed") {
-        $("progressFill").style.width = "100%";
-        $("progressText").textContent = "Research completed";
-    }
-}
-
-function connect() {
-    const protocol =
-        location.protocol === "https:" ? "wss:" : "ws:";
-
-    socket = new WebSocket(
-        `${protocol}//${location.host}/ws`
-    );
-
-    socket.onopen = () => {
-        setConnection(true);
-        setLayer(currentLayer);
-    };
-
-    socket.onmessage = event => {
-        let data;
-
-        try {
-            data = JSON.parse(event.data);
-        } catch {
-            return;
-        }
-
-        if (data.type === "initial") {
-            renderState(data.state || {});
-
-            eventHistory = data.events || [];
-            renderEvents();
-        }
-
-        if (data.type === "state") {
-            renderState(data.data || {});
-        }
-
-        if (data.type === "event") {
-            addEvent(data.data);
-        }
-
-        if (data.type === "screenshot") {
-            if (currentLayer === 3) {
-                $("screenshot").src =
-                    "data:image/jpeg;base64," + data.data;
-            }
-        }
-    };
-
-    socket.onclose = () => {
-        setConnection(false);
-        setTimeout(connect, 3000);
-    };
-
-    socket.onerror = () => {
-        setConnection(false);
-    };
-}
-
-function setLayer(number) {
-    currentLayer = number;
-
-    document.querySelectorAll(".tab").forEach(tab => {
-        tab.classList.toggle(
-            "active",
-            Number(tab.dataset.layer) === number
-        );
-    });
-
-    document.querySelectorAll(".layer").forEach(layer => {
-        layer.classList.remove("active");
-    });
-
-    $("layer" + number).classList.add("active");
-
-    if (socket && socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({
-            type: "layer",
-            layer: number
-        }));
-    }
-
-    if (number !== 3) {
-        $("screenshot").removeAttribute("src");
-    }
-}
-
-document.querySelectorAll(".tab").forEach(tab => {
-    tab.addEventListener("click", () => {
-        setLayer(Number(tab.dataset.layer));
-    });
-});
-
-async function startTask() {
-    const task = $("taskInput").value.trim();
-    const start_url = $("urlInput").value.trim();
-
-    if (!task) {
-        alert("Enter a research objective first.");
-        return;
-    }
-
-    $("startBtn").disabled = true;
-
-    try {
-        const response = await fetch("/api/start", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                task,
-                start_url
-            })
-        });
-
-        const result = await response.json();
-
-        if (!response.ok || result.error) {
-            alert(result.error || "Could not start research.");
-            $("startBtn").disabled = false;
-            return;
-        }
-
-        $("report").textContent =
-            "Research is running. Waiting for findings...";
-
-        $("report").classList.add("empty");
-
-    } catch (error) {
-        alert("Connection error: " + error.message);
-        $("startBtn").disabled = false;
-    }
-}
-
-async function stopTask() {
-    $("stopBtn").disabled = true;
-
-    try {
-        const response = await fetch("/api/stop", {
-            method: "POST"
-        });
-
-        const result = await response.json();
-
-        addEvent({
-            time: new Date().toLocaleTimeString(),
-            kind: "warning",
-            message: result.message || "Stop requested."
-        });
-
-    } catch (error) {
-        alert("Could not send stop request.");
-    }
-}
-
-connect();
-</script>
-
-</body>
-                               </html>
