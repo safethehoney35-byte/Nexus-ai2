@@ -1,0 +1,5 @@
+fastapi==0.115.12
+uvicorn[standard]==0.34.2
+playwright==1.52.0
+groq==0.26.0
+python-dotenv==1.1.0
