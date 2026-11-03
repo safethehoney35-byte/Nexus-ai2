@@ -91,13 +91,41 @@ async def create_plan(task, start_url):
     await update(phase="Planning", action="Understanding your instruction")
     await emit("Understanding task and selecting a research strategy", "PLANNER", "running")
     system = """Return ONLY valid JSON:
-{"intent":"open|search|research|interact","target_site":"named site or empty","start_url":"known URL or empty","search_query":"specific query or empty","goal":"short goal","target_sources":8}
-Preserve named websites. 'Open X' means open X, not search alternatives. If a starting URL is supplied, use it. Never invent URLs. Do not bypass CAPTCHA, paywalls, login gates or access restrictions. Maximum target_sources 12."""
+{"intent":"open|search|research|interact","target_site":"named site or empty","start_url":"known URL or empty","search_query":"specific query or empty","goal":"short goal","target_sources":8,"actions":[{"type":"click","target":"visible button or link label"},{"type":"scroll","direction":"down","amount":500},{"type":"wait","seconds":1},{"type":"inspect"}]}
+Preserve named websites. 'Open X' means open X, not search alternatives. If a starting URL is supplied, use it. Never invent URLs. Actions must be directly requested by the user, in the requested order, and only use click, scroll, wait, inspect. For click, target must be a visible button or link label. Never click controls for purchases, payments, account/security changes, posting, messaging, or form submission. Do not bypass CAPTCHA, paywalls, login gates or access restrictions. Maximum 8 actions and maximum target_sources 12."""
     plan = parse_json(await ask_groq(system, f"USER TASK:\n{task}\nSTART URL:\n{start_url or 'Not supplied'}", 1000))
     plan["target_sources"] = min(max(int(plan.get("target_sources", 8)), 1), MAX_SOURCES)
     plan["start_url"] = start_url or (validate_public_url(plan.get("start_url", "")) if plan.get("start_url") else "")
     plan["search_query"] = str(plan.get("search_query") or "").strip()
     plan["intent"] = str(plan.get("intent") or "research").lower()
+    allowed_actions = {"click", "scroll", "wait", "inspect"}
+    clean_actions = []
+    for action in plan.get("actions", [])[:8] if isinstance(plan.get("actions", []), list) else []:
+        if not isinstance(action, dict):
+            continue
+        kind = str(action.get("type", "")).lower()
+        if kind not in allowed_actions:
+            continue
+        item = {"type": kind}
+        if kind == "click":
+            target = str(action.get("target", "")).strip()[:120]
+            if target:
+                item["target"] = target
+            else:
+                continue
+        elif kind == "scroll":
+            item["direction"] = "up" if str(action.get("direction", "down")).lower() == "up" else "down"
+            try:
+                item["amount"] = min(max(int(action.get("amount", 500)), 100), 1200)
+            except (TypeError, ValueError):
+                item["amount"] = 500
+        elif kind == "wait":
+            try:
+                item["seconds"] = min(max(float(action.get("seconds", 1)), 0.2), 5)
+            except (TypeError, ValueError):
+                item["seconds"] = 1
+        clean_actions.append(item)
+    plan["actions"] = clean_actions
     state["target"] = plan["target_sources"]
     await update(phase="Plan ready", plan=plan, action="Research plan created")
     await emit("Research plan created", "PLANNER", "success")
@@ -271,6 +299,73 @@ async def interact_search(page, query):
         await emit(f"Website search failed: {str(e)[:150]}", "SEARCH", "failed")
         return False
 
+async def execute_requested_actions(page, actions):
+    """Execute a small allow-list of public browsing actions with DOM-based verification."""
+    for index, action in enumerate(actions or [], 1):
+        kind = action["type"]
+        before_url = page.url
+        before_title = await page.title()
+        if kind == "click":
+            target = action["target"]
+            if re.search(r"\b(buy|purchase|pay|checkout|subscribe|sign in|log in|logout|delete|remove account|change password|security|transfer|send|post|publish|place order)\b", target, re.I):
+                await emit(f"Skipped sensitive control label: {target}", "CLICK", "warning")
+                continue
+            await emit(f"Finding one visible button/link named: {target}", "DOM", "running")
+            matches = []
+            for role in ("button", "link"):
+                try:
+                    loc = page.get_by_role(role, name=target, exact=True)
+                    count = await loc.count()
+                    if count == 1 and await loc.first.is_visible():
+                        matches.append(loc.first)
+                except Exception:
+                    pass
+            if not matches:
+                for role in ("button", "link"):
+                    try:
+                        loc = page.get_by_role(role, name=target, exact=False)
+                        count = await loc.count()
+                        if count == 1 and await loc.first.is_visible():
+                            matches.append(loc.first)
+                    except Exception:
+                        pass
+            if len(matches) != 1:
+                await emit(f"Action {index}: '{target}' was ambiguous or not visible; nothing clicked",
+                           "CLICK", "warning")
+                continue
+            try:
+                await matches[0].click(timeout=3500)
+                await page.wait_for_timeout(700)
+                after_url = page.url
+                after_title = await page.title()
+                changed = after_url != before_url or after_title != before_title
+                await update(current_url=after_url, current_title=after_title,
+                             action=f"Clicked '{target}' · {'page changed' if changed else 'click completed'}")
+                await emit(f"Clicked unique DOM-matched control: {target}", "CLICK", "success")
+            except Exception as e:
+                await emit(f"Click failed for '{target}': {str(e)[:130]}", "CLICK", "failed")
+        elif kind == "scroll":
+            amount = action.get("amount", 500) * (1 if action.get("direction") == "down" else -1)
+            try:
+                await page.evaluate("(n) => window.scrollBy(0, n)", amount)
+                await emit(f"Scrolled {action.get('direction')} by {abs(amount)} px", "SCROLL", "success")
+            except Exception as e:
+                await emit(f"Scroll failed: {str(e)[:130]}", "SCROLL", "failed")
+        elif kind == "wait":
+            seconds = action.get("seconds", 1)
+            await page.wait_for_timeout(int(seconds * 1000))
+            await emit(f"Waited {seconds:g} second(s)", "WAIT", "success")
+        elif kind == "inspect":
+            try:
+                data = await extract_page(page)
+                await update(current_url=page.url, current_title=data.get("title", ""))
+                await emit(f"Inspected current DOM: {len(data.get('text', ''))} text characters, "
+                           f"{len(data.get('links', []))} links, {len(data.get('images', []))} image URLs",
+                           "INSPECT", "success")
+            except Exception as e:
+                await emit(f"DOM inspection failed: {str(e)[:130]}", "INSPECT", "failed")
+
+
 async def save_source(data):
     u = validate_public_url(data.get("url", ""))
     if not u or u in seen_urls:
@@ -408,6 +503,8 @@ async def run_agent(task, start_url):
                     if not found:
                         await emit("Search may not have returned usable results; extracting current page text anyway",
                                    "WARNING", "warning")
+                if plan.get("actions"):
+                    await execute_requested_actions(page, plan["actions"])
                 data = await extract_page(page)
                 await save_images(data.get("images"), page.url)
                 title = data["title"] or plan.get("target_site") or page.url
@@ -502,7 +599,7 @@ async def dashboard_head():
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "app": APP_NAME, "version": "0.4"}
+    return {"status": "healthy", "app": APP_NAME, "version": "0.5"}
 
 @app.get("/api/status")
 async def get_status():
@@ -521,7 +618,7 @@ async def start_agent(req: StartRequest):
         if not url:
             return JSONResponse({"error": "Enter a valid public HTTP/HTTPS URL"}, status_code=400)
     agent_task = asyncio.create_task(run_agent(req.task.strip(), url))
-    return {"success": True, "message": "NEXUS started", "version": "0.4"}
+    return {"success": True, "message": "NEXUS started", "version": "0.5"}
 
 @app.post("/api/stop")
 async def stop_agent():
