@@ -1,1 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0b1020"><title>NEXUS AI</title>
+<style>
+:root{color-scheme:dark;--bg:#0b1020;--panel:#111a2c;--card:#162238;--line:#263650;--text:#edf3ff;--muted:#91a2bd;--accent:#7c9cff;--green:#53d6a2;--red:#ff737d;--amber:#f6c76b}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,Segoe UI,sans-serif}
+.wrap{max-width:1500px;margin:auto;padding:18px}.top{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:18px}.brand{font-size:22px;font-weight:800;letter-spacing:2px}.brand span{color:var(--accent)}.badge{border:1px solid var(--line);border-radius:30px;padding:7px 11px;color:var(--muted);font-size:12px}
+.grid{display:grid;grid-template-columns:minmax(270px,360px) minmax(0,1fr);gap:14px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:15px;padding:16px;min-width:0}.section{font-size:12px;color:var(--muted);letter-spacing:1.3px;font-weight:700;margin:0 0 12px}
+label{display:block;color:var(--muted);font-size:12px;margin:13px 0 6px}input,textarea{width:100%;background:#0b1425;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:12px;font:inherit;outline:none}input:focus,textarea:focus{border-color:var(--accent)}textarea{min-height:115px;resize:vertical}
+button{border:0;border-radius:10px;padding:12px 15px;font-weight:700;cursor:pointer;min-height:44px}.primary{background:var(--accent);color:#081126;width:100%;margin-top:14px}.stop{background:#49232d;color:#ffdce0;width:100%;margin-top:8px}.hint{font-size:12px;color:var(--muted);margin-top:10px}
+.browserhead{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:10px}.url{font-size:12px;color:var(--muted);overflow-wrap:anywhere}.screen{background:#070b13;border:1px solid var(--line);border-radius:11px;min-height:220px;display:flex;align-items:center;justify-content:center;overflow:hidden}.screen img{width:100%;height:auto;display:block}.placeholder{color:var(--muted);padding:40px;text-align:center}
+.lower{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}.status{font-size:18px;font-weight:700}.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--muted);margin-right:7px}.dot.live{background:var(--green);box-shadow:0 0 10px #53d6a255}.events{max-height:300px;overflow:auto}.event{padding:9px 0;border-bottom:1px solid var(--line);font-size:13px}.event small{display:block;color:var(--muted);font-size:10px;margin-bottom:3px}.event.error{color:var(--red)}.event.success{color:var(--green)}.event.warning{color:var(--amber)}
+.foot{color:var(--muted);font-size:11px;margin:15px 2px}.pill{font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:20px;padding:4px 8px}
+@media(max-width:800px){.wrap{padding:12px}.grid,.lower{grid-template-columns:1fr}.top{align-items:flex-start}.screen{min-height:190px}.brand{font-size:19px}}
+</style>
+</head>
+<body><main class="wrap">
+<header class="top"><div class="brand">NEXUS<span> / AI</span></div><div class="badge" id="connection">● CONNECTING</div></header>
+<div class="grid">
+<section class="panel">
+<h2 class="section">COMMAND CENTRE</h2>
+<label for="url">STARTING WEBSITE</label><input id="url" value="https://www.google.com" inputmode="url" autocomplete="url">
+<label for="instruction">WHAT SHOULD NEXUS DO?</label><textarea id="instruction" placeholder="Example: Search for three reliable sources about solar energy and summarize the key points."></textarea>
+<button class="primary" id="start">▶ RUN AGENT</button><button class="stop" id="stop" type="button">■ STOP AGENT</button>
+<p class="hint">Research-only starter. It won't purchase, pay, submit forms, enter passwords, or bypass access controls.</p>
+<hr style="border:0;border-top:1px solid var(--line);margin:18px 0">
+<h2 class="section">TASK MONITOR</h2><div class="status"><span class="dot" id="dot"></span><span id="status">Idle</span></div>
+<p class="hint" id="taskid">No active task</p><p class="hint" id="currenturl">No page loaded</p>
+</section>
+<section class="panel">
+<div class="browserhead"><h2 class="section" style="margin:0">LIVE BROWSER VIEW</h2><span class="pill">REMOTE CHROMIUM</span></div>
+<div class="screen" id="screen"><div class="placeholder">Your browser preview will appear here when the agent starts.</div></div>
+<div class="hint">Preview updates as screenshots. The remote browser itself is not directly touch-controlled from this panel.</div>
+</section>
+</div>
+<div class="lower">
+<section class="panel"><h2 class="section">AGENT ACTIVITY / ERROR MONITOR</h2><div class="events" id="events" aria-live="polite"><div class="hint">Waiting for activity…</div></div></section>
+<section class="panel"><h2 class="section">INTEGRITY & VERIFICATION</h2><div class="hint" id="integrity">Operation IDs and SHA-256 fingerprints are attached to activity events. Browser outcomes are checked after actions; this detects accidental record changes, not whether the AI's choice is logically correct.</div></section>
+</div>
+<p class="foot">NEXUS AI · Prototype v0.1 · Keep your Groq API key private. Do not use this prototype for sensitive accounts or consequential actions.</p>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+let socket;
+function addEvent(e){const row=document.createElement('div');row.className='event '+(e.level||'info');const time=new Date().toLocaleTimeString();const small=document.createElement('small');small.textContent=(e.id||'EVENT')+' · '+time;const msg=document.createElement('div');msg.textContent=e.message||'';row.append(small,msg);$('events').prepend(row);while($('events').children.length>100)$('events').lastChild.remove();if(e.sha256)$('integrity').textContent='Latest event fingerprint: '+e.sha256.slice(0,32)+'… · ID: '+e.id;}
+function setState(s){$('status').textContent=s.status||'Idle';$('dot').classList.toggle('live',!!s.running);$('taskid').textContent=s.task_id||'No active task';$('currenturl').textContent=s.url||'No page loaded';}
+function connect(){const proto=location.protocol==='https:'?'wss':'ws';socket=new WebSocket(proto+'://'+location.host+'/ws');socket.onopen=()=>$('connection').textContent='● CONNECTED';socket.onclose=()=>{$('connection').textContent='● RECONNECTING';setTimeout(connect,1800)};socket.onerror=()=>socket.close();socket.onmessage=ev=>{const d=JSON.parse(ev.data);if(d.type==='state')setState(d);if(d.type==='event')addEvent(d);if(d.type==='screenshot')$('screen').innerHTML='<img alt="Live browser screenshot" src="data:image/jpeg;base64,'+d.image+'">';if(d.type==='completed')addEvent({level:'success',message:'Task finished: '+d.summary});};}
+$('start').addEventListener('click',async()=>{const url=$('url').value.trim(),instruction=$('instruction').value.trim();if(!instruction){alert('Enter an instruction first.');return;} $('start').disabled=true;$('start').textContent='STARTING…';try{const r=await fetch('/api/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url,instruction})});const data=await r.json();if(!r.ok)throw new Error(data.error||'Could not start task');addEvent({message:'Task accepted by NEXUS',level:'success'});}catch(e){addEvent({message:e.message,level:'error'});alert(e.message);}finally{$('start').disabled=false;$('start').textContent='▶ RUN AGENT';}});
+$('stop').addEventListener('click',async()=>{try{await fetch('/api/stop',{method:'POST'});addEvent({message:'Stop requested',level:'warning'});}catch(e){addEvent({message:'Could not send stop request',level:'error'});}});
+connect();
+fetch('/api/status').then(r=>r.json()).then(d=>{setState(d.state);(d.events||[]).forEach(addEvent)}).catch(()=>{});
+</script></body></html>
 
