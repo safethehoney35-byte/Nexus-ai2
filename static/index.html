@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>NEXUS AI v0.4</title>
+<title>NEXUS AI v0.5</title>
 <style>
 *{box-sizing:border-box}body{margin:0;background:#080b12;color:#edf1fa;font-family:Inter,Arial,sans-serif}
 header{min-height:65px;border-bottom:1px solid #202737;display:flex;align-items:center;justify-content:space-between;padding:0 22px}
@@ -36,7 +36,7 @@ textarea{min-height:95px;resize:vertical}.primary,.stop{color:white;border:0;pad
 @media(max-width:750px){.grid{grid-template-columns:repeat(2,1fr)}main{padding:13px}.tag{min-width:75px}}
 </style></head>
 <body>
-<header><div class="logo">NEXUS<span> AI</span> <small>v0.4</small></div><div class="connection" id="connection">● CONNECTING</div></header>
+<header><div class="logo">NEXUS<span> AI</span> <small>v0.5</small></div><div class="connection" id="connection">● CONNECTING</div></header>
 <nav>
 <button class="active" onclick="setLayer(1,this)">Overview</button>
 <button onclick="setLayer(2,this)">Research & Sources</button>
@@ -47,7 +47,7 @@ textarea{min-height:95px;resize:vertical}.primary,.stop{color:white;border:0;pad
 <main>
 <section id="overview">
 <div class="panel"><h2>Research Command</h2>
-<textarea id="task" placeholder="Example: Open YouTube and search for science documentaries"></textarea>
+<textarea id="task" placeholder="Example: Open YouTube, search for science documentaries, then click the unique “Videos” button"></textarea>
 <input id="startUrl" placeholder="Starting website URL (example: https://www.youtube.com) — optional">
 <button class="primary" onclick="startTask()">START NEXUS</button> <button class="stop" onclick="stopTask()">STOP</button>
 <p class="muted" id="statusText">Waiting for instruction.</p></div>
