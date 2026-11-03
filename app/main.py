@@ -634,6 +634,10 @@ async def run_agent(request):
 @app.get("/")
 async def dashboard():
     return FileResponse("static/index.html")
+   
+@app.get("/health")
+async def health():
+    return {"status": "healthy", "app": "NEXUS AI"}
 
 
 @app.get("/api/status")
