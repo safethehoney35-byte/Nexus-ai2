@@ -1,40 +1,37 @@
-# NEXUS AI v0.5 — browser research agent
+# NEXUS AI v0.6 — dashboard repair + selector diagnostics
 
-A mobile-friendly dashboard + FastAPI + Playwright + Groq starter. The dashboard and API run together as one Render service.
+A mobile-friendly FastAPI dashboard with working health, status, start/stop, and WebSocket endpoints, plus a read-only Linkvertise DOM selector diagnostic.
 
-## What this build can do
-- Accept a task and optional starting URL.
-- Open public HTTP/HTTPS pages and search the public web.
-- Extract page text, links, video links and image URLs separately.
-- Use a small allow-list of DOM-based browser actions: click one uniquely matched visible button/link, scroll, wait and inspect.
-- Verify action outcomes and show green/amber/red activity logs.
-- Stream a remote Chromium screenshot preview while the Browser tab is open.
-- Stop a running task and expose `/health` for Render health checks.
+## What's repaired
+- `/health` returns a health response for deployment checks.
+- `/api/status` returns a consistent state object used by the dashboard.
+- `/api/start` and `/api/stop` now exist and return honest task lifecycle states.
+- `/ws` accepts dashboard connections and streams state/events; the dashboard reconnects if disconnected.
+- `/automation/nexus-bypass` serves the dashboard from `static/index.html`.
+- Removed the old fake three-ad timer and false “success”/“clicked” logs. The backend does not claim to have browsed or completed ads.
 
-## Important safety and reliability limits
-- Clicks are attempted only when a visible button/link resolves uniquely by accessible name. Ambiguous matches are not clicked.
-- Sensitive controls (for example purchase, payment, account, posting or deletion controls) are skipped.
-- NEXUS does not enter passwords, submit general forms, make purchases, bypass CAPTCHAs/paywalls/logins, or evade site access restrictions.
-- Use only sites you are allowed to access and respect their terms.
-- Screenshots are a preview, not an interactive remote desktop. Some sites block automation or image hotlinking.
-- Render free instances may sleep and have limited CPU/RAM; long tasks may be interrupted.
-- Groq API usage may incur limits or costs according to your provider account.
+## Selector Diagnostic Mode
+1. Open the dashboard and choose **Actions & Diagnostics**.
+2. In the browser/inspector where you are inspecting a page, copy its DOM snapshot (for example, `document.documentElement.outerHTML`).
+3. Paste that snapshot into **Linkvertise Selector Diagnostic** and choose **RUN SELECTOR CHECKS**.
+4. The dashboard parses the supplied snapshot locally with `DOMParser` and reports matches for Watch Ads, Continue, ad counter, Ad label, Skip Ad presence, success heading, content-ready heading, and Open here.
 
-## Deploy on Render
-1. Push the project files to a GitHub repository.
-2. In Render, create a Docker Web Service or use the included `render.yaml` Blueprint.
-3. Set `GROQ_API_KEY` as a Render environment variable. Never put the key in frontend code or commit it to GitHub.
-4. Deploy and wait until the service is Live.
-5. Open the Render service URL. `/health` should return a healthy status.
+The diagnostic is read-only. It does not navigate to Linkvertise, click advertisements, skip ads, simulate completion, or forge reward/access state. Selectors for stages not present in the pasted snapshot will correctly show NOT FOUND.
 
-The default model is set by `GROQ_MODEL` in the environment; the current fallback is `openai/gpt-oss-120b`.
+## Current limitations
+- The research task endpoint is a connection/lifecycle placeholder, not a full research agent. It deliberately reports that no research provider/browser task was run instead of fabricating collected sources or screenshots.
+- The selector checker tests a pasted snapshot, not the live DOM in another browser tab. Dynamic page state can change after the snapshot is copied.
+- No Groq key or browser automation provider is used by this build.
 
 ## Run locally
 ```bash
 python -m venv .venv
+# Windows: .venv\\Scripts\\activate
+# macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
-playwright install chromium
-# Set GROQ_API_KEY in your environment
 uvicorn app.main:app --reload
 ```
-Open http://127.0.0.1:8000
+Open `http://127.0.0.1:8000/automation/nexus-bypass`.
+
+## Deploy on Render
+Use the included `render.yaml` or Dockerfile. The health check path is `/health`. Set the service start command to `uvicorn app.main:app --host 0.0.0.0 --port $PORT`.

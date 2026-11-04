@@ -1,9 +1,7 @@
 services:
   - type: web
     name: nexus-ai2-service
-    env: python
+    runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
-    envVars:
-      - key: PORT
-        value: 10000
+    healthCheckPath: /health
