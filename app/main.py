@@ -8,14 +8,12 @@ from playwright_stealth import stealth_async
 
 app = FastAPI()
 
-# Dashboard frontend linking parameters
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-class MissionRequest(BaseModel):
+class StealthRouteRequest(BaseModel):
     url: str
 
-# Armour inventory data matrix
-ARMOUR_SUITS = [
+STEALTH_METRIC_PROFILES = [
     {
         "os": "ios",
         "ua": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
@@ -28,70 +26,82 @@ ARMOUR_SUITS = [
     }
 ]
 
-def inject_stealth_gear(vendor, renderer):
+def compile_camouflage_driver(vendor, renderer):
     return f"""
     (() => {{
-        const glProxy = (target, thisArg, args) => {{
-            if (args === 37445) return "{vendor}";
-            if (args === 37446) return "{renderer}";
-            return Reflect.apply(target, thisArg, args);
+        const hardwareContextProxy = (target, thisArg, argumentsList) => {{
+            if (argumentsList === 37445) return "{vendor}";
+            if (argumentsList === 37446) return "{renderer}";
+            return Reflect.apply(target, thisArg, argumentsList);
         }};
-        if (window.WebGLRenderingContext) window.WebGLRenderingContext.prototype.getParameter = new Proxy(window.WebGLRenderingContext.prototype.getParameter, {{ apply: glProxy }});
-        if (window.WebGL2RenderingContext) window.WebGL2RenderingContext.prototype.getParameter = new Proxy(window.WebGL2RenderingContext.prototype.getParameter, {{ apply: glProxy }});
+        if (window.WebGLRenderingContext) window.WebGLRenderingContext.prototype.getParameter = new Proxy(window.WebGLRenderingContext.prototype.getParameter, {{ apply: hardwareContextProxy }});
+        if (window.WebGL2RenderingContext) window.WebGL2RenderingContext.prototype.getParameter = new Proxy(window.WebGL2RenderingContext.prototype.getParameter, {{ apply: hardwareContextProxy }});
         
-        let a = {random.uniform(20, 45)}, b = {random.uniform(-1, 1)}, c = {random.uniform(-1, 1)};
+        let orientationAlpha = {random.uniform(15.0, 60.0)}, orientationBeta = {random.uniform(-3.0, 3.0)}, orientationGamma = {random.uniform(-3.0, 3.0)};
         setInterval(() => {{
-            a += (Math.random() - 0.5) * 0.1; b += (Math.random() - 0.5) * 0.1; c += (Math.random() - 0.5) * 0.1;
-            window.dispatchEvent(new DeviceOrientationEvent('deviceorientation', {{ alpha: a, beta: b, gamma: c, absolute: false }}));
+            orientationAlpha += (Math.random() - 0.5) * 0.1;
+            orientationBeta += (Math.random() - 0.5) * 0.1;
+            orientationGamma += (Math.random() - 0.5) * 0.1;
+            window.dispatchEvent(new DeviceOrientationEvent('deviceorientation', {{
+                alpha: orientationAlpha, beta: orientationBeta, gamma: orientationGamma, absolute: false
+            }}));
         }}, 50);
     })();
     """
 
-async def timing_tunnel(page):
+async def execute_behavioral_tunnel(page):
     try:
-        elements = await page.locator("p, article, img").count()
-        delay = min(0.5 + (elements * 0.03) + random.uniform(0.5, 2.0), 4.8)
-        await asyncio.sleep(delay)
-        return delay
-    except:
-        delay = random.uniform(1.5, 3.0)
-        await asyncio.sleep(delay)
-        return delay
+        dom_blocks = await page.locator("p, h1, img").count()
+        delay_factor = min(0.6 + (dom_blocks * 0.04) + random.uniform(0.3, 2.0), 4.9)
+        await asyncio.sleep(delay_factor)
+        return delay_factor
+    except Exception:
+        fallback_pause = random.uniform(1.8, 3.4)
+        await asyncio.sleep(fallback_pause)
+        return fallback_pause
 
 @app.post("/api/run")
-async def start_stealth_mission(request: MissionRequest):
+async def process_stealth_pipeline(request: StealthRouteRequest):
     async with async_playwright() as p:
-        suit = random.choice(ARMOUR_SUITS)
-        browser = await p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-blink-features=AutomationControlled"])
+        allocated_profile = random.choice(STEALTH_METRIC_PROFILES)
+        target_w = allocated_profile["w"] + random.randint(-4, 4)
+        target_h = allocated_profile["h"] + random.randint(-8, 8)
         
-        context = await browser.new_context(
-            user_agent=suit["ua"],
-            viewport={"width": suit["w"], "height": suit["h"]},
-            device_scale_factor=suit["scale"],
-            is_mobile=True, has_touch=True, timezone_id=suit["tz"]
+        browser = await p.chromium.launch(
+            headless=True, 
+            args=["--no-sandbox", "--disable-gpu", "--disable-setuid-sandbox", "--disable-blink-features=AutomationControlled"]
         )
         
-        await context.add_init_script(inject_stealth_gear(suit["vendor"], suit["renderer"]))
+        context = await browser.new_context(
+            user_agent=allocated_profile["ua"],
+            viewport={"width": target_w, "height": target_h},
+            device_scale_factor=allocated_profile["scale"],
+            is_mobile=True, has_touch=True, timezone_id=allocated_profile["tz"]
+        )
+        
+        camouflage_payload = compile_camouflage_driver(allocated_profile["vendor"], allocated_profile["renderer"])
+        await context.add_init_script(camouflage_payload)
+        
         page = await context.new_page()
         await stealth_async(page)
         
         try:
             response = await page.goto(request.url, wait_until="commit", timeout=30000)
-            time_paused = await timing_tunnel(page)
-            page_title = await page.title()
+            tunnel_delay = await execute_behavioral_tunnel(page)
+            extracted_title = await page.title()
             
             return {
                 "status": "success",
-                "title": page_title,
+                "title": extracted_title,
                 "http_code": response.status if response else 200,
-                "equipped_suit": {
-                    "os": suit["os"],
-                    "gpu": suit["renderer"],
-                    "delay_spent": f"{time_paused:.2f}s",
-                    "resolution": f"{suit['w']}x{suit['h']}"
+                "profile_used": {
+                    "os": allocated_profile["os"],
+                    "gpu": allocated_profile["renderer"],
+                    "resolution": f"{target_w}x{target_h}",
+                    "delay_spent": f"{tunnel_delay:.2f}s"
                 }
             }
         except Exception as e:
-            return {"status": "failed", "error": str(e)}
+            return {"status": "error", "message": str(e)}
         finally:
             await browser.close()
