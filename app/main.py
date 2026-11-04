@@ -1,341 +1,962 @@
-from __future__ import annotations
-
 import asyncio
+import ipaddress
 import json
-import os
+import secrets
+import socket
 import time
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any
+
+from contextlib import asynccontextmanager
+from typing import Optional
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
-
-BASE_DIR = Path(__file__).resolve().parent.parent
-STATIC_DIR = BASE_DIR / "static"
-
-app = FastAPI(title="Nexus AI", version="0.6.0")
-
-# Serve static files
-if STATIC_DIR.is_dir():
-    app.mount(
-        "/static",
-        StaticFiles(directory=str(STATIC_DIR)),
-        name="static",
-    )
-
-# Application state
-state: dict[str, Any] = {
-    "status": "idle",
-    "phase": "Ready",
-    "action": "Waiting for a task.",
-    "collected": 0,
-    "analysed": 0,
-    "target": 12,
-    "current_url": "",
-    "current_title": "",
-    "sources": [],
-    "images": [],
-    "actions": [],
-    "plan": [],
-    "report": "",
-    "network": {"checks": [], "note": "Not run."},
-    "elapsed": 0,
-}
-
-events: list[dict[str, str]] = []
-clients: set[WebSocket] = set()
-task_runner: asyncio.Task | None = None
-started_at: float | None = None
+from pydantic import BaseModel, HttpUrl
+from playwright.async_api import (
+    async_playwright,
+    Browser,
+    BrowserContext,
+    Page,
+)
 
 
-def stamp() -> str:
-    return datetime.now(timezone.utc).astimezone().strftime("%H:%M:%S")
+# ============================================================
+# NEXUS AI CONFIGURATION
+# ============================================================
+
+APP_NAME = "Nexus AI"
+APP_VERSION = "0.7.0"
+
+MAX_APPROVAL_AGE = 30
+
+browser_engine = None
+browser: Optional[Browser] = None
+browser_context: Optional[BrowserContext] = None
+page: Optional[Page] = None
+
+active_url = None
+browser_running = False
+
+connected_clients = set()
+pending_approvals = {}
 
 
-def log(message: str, status: str = "info") -> dict[str, str]:
-    event = {
-        "time": stamp(),
-        "message": message,
-        "status": status,
-    }
-    events.append(event)
-    del events[:-120]
-    return event
+# ============================================================
+# PREDEFINED SELECTOR LIBRARY
+# ============================================================
+
+SELECTOR_LIBRARY = [
+    {
+        "name": "Watch Ads option",
+        "selector": '[data-testid="lv-membership-plan-option-wrapper-btn"]',
+        "category": "ad_reward_detection",
+        "detection_only": True,
+    },
+    {
+        "name": "Continue button",
+        "selector": '[data-testid="action-wall-continue-action-btn"]',
+        "category": "ad_reward_detection",
+        "detection_only": True,
+    },
+    {
+        "name": "Ad counter",
+        "selector": ".carousel-items-counter p",
+        "category": "ad_reward_detection",
+        "detection_only": True,
+    },
+    {
+        "name": "Ad label",
+        "selector": ".lv-card__ad-indicator p",
+        "category": "ad_reward_detection",
+        "detection_only": True,
+    },
+    {
+        "name": "Skip Ad control",
+        "selector": '[data-testid="lv-lib-carousel-skip-btn"]',
+        "category": "ad_reward_detection",
+        "detection_only": True,
+    },
+    {
+        "name": "Success heading",
+        "selector": '[data-testid="success-title"]',
+        "category": "ad_reward_detection",
+        "detection_only": True,
+    },
+    {
+        "name": "Content-ready heading",
+        "selector": ".success-wrapper h2",
+        "category": "ad_reward_detection",
+        "detection_only": True,
+    },
+    {
+        "name": "Open here button",
+        "selector": ".success-wrapper button",
+        "category": "ad_reward_detection",
+        "detection_only": True,
+    },
+]
 
 
-async def broadcast(payload: dict[str, Any]) -> None:
-    stale = []
+# ============================================================
+# APP LIFECYCLE
+# ============================================================
 
-    for ws in list(clients):
-        try:
-            await ws.send_text(json.dumps(payload))
-        except Exception:
-            stale.append(ws)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
 
-    for ws in stale:
-        clients.discard(ws)
+    await stop_browser()
 
 
-async def publish(message: str, status: str = "info") -> None:
-    event = log(message, status)
+app = FastAPI(
+    title=APP_NAME,
+    version=APP_VERSION,
+    lifespan=lifespan,
+)
 
-    await broadcast({
-        "type": "event",
-        "event": event,
-    })
+app.mount(
+    "/static",
+    StaticFiles(directory="static"),
+    name="static",
+)
 
-    await broadcast({
-        "type": "state",
-        "state": state,
-        "events": events[-40:],
-    })
 
+# ============================================================
+# REQUEST MODELS
+# ============================================================
 
 class StartRequest(BaseModel):
-    task: str = Field(min_length=1, max_length=2000)
-    start_url: str = Field(default="", max_length=2048)
+    url: Optional[str] = None
 
 
-class SelectorCheckRequest(BaseModel):
-    html: str = Field(min_length=1, max_length=1_000_000)
-    selectors: list[str] = Field(default_factory=list, max_length=30)
+class NavigateRequest(BaseModel):
+    url: str
 
 
-# Health check for Render
-@app.get("/health")
-async def health():
-    return {
-        "ok": True,
-        "status": "healthy",
-        "version": app.version,
+class InspectRequest(BaseModel):
+    selector: str
+
+
+class PrepareActionRequest(BaseModel):
+    selector: str
+
+
+class ExecuteActionRequest(BaseModel):
+    approval_token: str
+
+
+# ============================================================
+# WEBSOCKET MANAGER
+# ============================================================
+
+async def broadcast(event_type, data):
+
+    message = {
+        "type": event_type,
+        "timestamp": time.time(),
+        "data": data,
     }
 
+    disconnected = set()
 
-# Root endpoint
-@app.get("/", response_class=JSONResponse)
-async def root_index():
-    return {
-        "status": "online",
-        "version": app.version,
-        "agent": "Nexus AI",
-        "dashboard": "/automation/nexus-bypass",
-        "health": "/health",
-    }
-
-
-# Dashboard
-@app.get("/automation/nexus-bypass", response_class=HTMLResponse)
-async def dashboard():
-    page = STATIC_DIR / "index.html"
-
-    if not page.exists():
-        return HTMLResponse(
-            "Dashboard file missing",
-            status_code=500,
-        )
-
-    return HTMLResponse(
-        page.read_text(encoding="utf-8")
-    )
-
-
-# Task lifecycle
-async def run_placeholder_research(
-    task_text: str,
-    start_url: str,
-) -> None:
-    global started_at
-
-    started_at = time.monotonic()
-
-    state.update(
-        status="running",
-        phase="Task accepted",
-        action="Validating task",
-        report="",
-    )
-
-    await publish(
-        "Task accepted. No browser actions have been performed.",
-        "success",
-    )
-
-    if start_url:
-        parsed = urlparse(start_url)
-
-        if parsed.scheme not in ("http", "https") or not parsed.hostname:
-            state.update(
-                status="failed",
-                phase="Invalid URL",
-                action="Provide a valid public HTTP(S) URL.",
-            )
-
-            await publish(
-                "Starting URL must be a valid HTTP or HTTPS URL.",
-                "failed",
-            )
-            return
-
-        state["current_url"] = start_url
-
-    state.update(
-        status="idle",
-        phase="Ready for research integration",
-        action=(
-            "Backend connection is working; "
-            "research provider is not configured."
-        ),
-    )
-
-    state["report"] = (
-        "NEXUS backend is connected. This build provides "
-        "the dashboard/API lifecycle and selector diagnostics. "
-        "A live research/browser provider is not configured, "
-        "so no web research or browser interaction was run."
-    )
-
-    state["elapsed"] = round(
-        time.monotonic() - started_at,
-        2,
-    )
-
-    await publish(
-        "Task lifecycle check completed. Research engine is "
-        "not configured; no simulated results were created.",
-        "warning",
-    )
-
-
-# API status
-@app.get("/api/status")
-async def api_status():
-    if started_at and state["status"] == "running":
-        state["elapsed"] = round(
-            time.monotonic() - started_at,
-            2,
-        )
-
-    return {
-        "state": state,
-        "events": events[-40:],
-    }
-
-
-# Start task
-@app.post("/api/start")
-async def api_start(payload: StartRequest):
-    global task_runner
-
-    if task_runner and not task_runner.done():
-        return JSONResponse(
-            {"error": "A task is already running."},
-            status_code=409,
-        )
-
-    task_runner = asyncio.create_task(
-        run_placeholder_research(
-            payload.task.strip(),
-            payload.start_url.strip(),
-        )
-    )
-
-    return {
-        "ok": True,
-        "message": "Task accepted",
-        "status": "running",
-    }
-
-
-# Stop task
-@app.post("/api/stop")
-async def api_stop():
-    global task_runner
-
-    if task_runner and not task_runner.done():
-        task_runner.cancel()
-
+    for client in connected_clients:
         try:
-            await task_runner
-        except asyncio.CancelledError:
-            pass
+            await client.send_json(message)
 
-    state.update(
-        status="stopped",
-        phase="Stopped",
-        action="Task stopped by user.",
-    )
+        except Exception:
+            disconnected.add(client)
 
-    await publish(
-        "Task stopped by user.",
-        "warning",
-    )
-
-    return {
-        "ok": True,
-        "status": "stopped",
-    }
+    for client in disconnected:
+        connected_clients.discard(client)
 
 
-# Selector diagnostics
-@app.post("/api/diagnostics/selectors")
-async def selector_diagnostics(
-    payload: SelectorCheckRequest,
-):
-    return {
-        "ok": True,
-        "message": (
-            "Send the HTML snapshot to the dashboard's "
-            "local DOMParser diagnostic."
-        ),
-        "selector_count": len(payload.selectors),
-    }
+# ============================================================
+# URL VALIDATION
+# ============================================================
 
+async def validate_public_url(url: str):
 
-# WebSocket
-@app.websocket("/ws")
-async def websocket_endpoint(ws: WebSocket):
-    await ws.accept()
-    clients.add(ws)
+    parsed = urlparse(url)
 
-    await ws.send_text(
-        json.dumps({
-            "type": "state",
-            "state": state,
-            "events": events[-40:],
-        })
-    )
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(
+            status_code=400,
+            detail="Only HTTP and HTTPS URLs are allowed.",
+        )
+
+    hostname = parsed.hostname
+
+    if not hostname:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid URL hostname.",
+        )
+
+    if hostname.lower() == "localhost":
+        raise HTTPException(
+            status_code=403,
+            detail="Local addresses are blocked.",
+        )
 
     try:
-        while True:
-            message = await ws.receive_text()
+        addresses = await asyncio.get_running_loop().getaddrinfo(
+            hostname,
+            parsed.port or (443 if parsed.scheme == "https" else 80),
+            type=socket.SOCK_STREAM,
+        )
 
-            try:
-                data = json.loads(message)
-            except json.JSONDecodeError:
-                continue
+        for address in addresses:
 
-            if data.get("type") == "ping":
-                await ws.send_text(
-                    json.dumps({"type": "pong"})
+            ip = ipaddress.ip_address(address[4][0])
+
+            if not ip.is_global:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Private or reserved network addresses are blocked.",
                 )
 
-    except WebSocketDisconnect:
-        clients.discard(ws)
+    except HTTPException:
+        raise
 
     except Exception:
-        clients.discard(ws)
+        raise HTTPException(
+            status_code=400,
+            detail="Unable to validate destination address.",
+        )
+
+    return url
 
 
-# Run server
-if __name__ == "__main__":
-    import uvicorn
+# ============================================================
+# BROWSER REQUEST FILTER
+# ============================================================
 
-    uvicorn.run(
-        "app.main:app",
-        host="0.0.0.0",
-        port=int(os.environ.get("PORT", "10000")),
+async def filter_browser_request(route):
+
+    request_url = route.request.url
+
+    try:
+        await validate_public_url(request_url)
+        await route.continue_()
+
+    except Exception:
+        await route.abort()
+
+
+# ============================================================
+# BROWSER MANAGEMENT
+# ============================================================
+
+async def start_browser():
+
+    global browser_engine
+    global browser
+    global browser_context
+    global page
+    global browser_running
+
+    if browser_running and page:
+        return
+
+    try:
+
+        browser_engine = await async_playwright().start()
+
+        browser = await browser_engine.chromium.launch(
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+            ],
+        )
+
+        browser_context = await browser.new_context(
+            viewport={
+                "width": 1366,
+                "height": 768,
+            },
+        )
+
+        await browser_context.route(
+            "**/*",
+            filter_browser_request,
+        )
+
+        page = await browser_context.new_page()
+
+        await page.expose_binding(
+            "nexusNotify",
+            handle_dom_notification,
+        )
+
+        browser_running = True
+
+        await broadcast(
+            "browser_started",
+            {
+                "status": "running",
+                "engine": "Chromium",
+            },
+        )
+
+        return True
+
+    except Exception as error:
+
+        browser_running = False
+
+        await broadcast(
+            "error",
+            {
+                "message": str(error),
+            },
+        )
+
+        raise
+
+
+async def stop_browser():
+
+    global browser_engine
+    global browser
+    global browser_context
+    global page
+    global browser_running
+    global active_url
+
+    browser_running = False
+    active_url = None
+
+    pending_approvals.clear()
+
+    try:
+        if browser_context:
+            await browser_context.close()
+
+    except Exception:
+        pass
+
+    try:
+        if browser:
+            await browser.close()
+
+    except Exception:
+        pass
+
+    try:
+        if browser_engine:
+            await browser_engine.stop()
+
+    except Exception:
+        pass
+
+    browser_engine = None
+    browser = None
+    browser_context = None
+    page = None
+
+    await broadcast(
+        "browser_stopped",
+        {
+            "status": "stopped",
+        },
     )
+
+
+# ============================================================
+# LIVE DOM MONITORING
+# ============================================================
+
+async def handle_dom_notification(source, payload):
+
+    await broadcast(
+        "dom_changed",
+        payload,
+    )
+
+
+DOM_OBSERVER_SCRIPT = """
+(() => {
+
+    if (window.__nexusObserverInstalled) {
+        return;
+    }
+
+    window.__nexusObserverInstalled = true;
+
+    let timer = null;
+
+    const notify = () => {
+
+        clearTimeout(timer);
+
+        timer = setTimeout(() => {
+
+            if (typeof window.nexusNotify === "function") {
+
+                window.nexusNotify({
+                    event: "DOM_UPDATED",
+                    url: location.href,
+                    title: document.title,
+                    timestamp: Date.now()
+                });
+
+            }
+
+        }, 150);
+
+    };
+
+    const observer = new MutationObserver(() => {
+        notify();
+    });
+
+    observer.observe(document.documentElement, {
+
+        childList: true,
+        subtree: true,
+        attributes: true,
+        characterData: true
+
+    });
+
+})();
+"""
+
+
+async def install_dom_observer():
+
+    if not page:
+        return
+
+    try:
+
+        await page.evaluate(
+            DOM_OBSERVER_SCRIPT
+        )
+
+    except Exception:
+        pass
+
+
+# ============================================================
+# CLICKABILITY DETECTION
+# ============================================================
+
+CLICKABILITY_SCRIPT = """
+(selector) => {
+
+    const elements = Array.from(
+        document.querySelectorAll(selector)
+    );
+
+    return elements.map((element, index) => {
+
+        const style = getComputedStyle(element);
+
+        const rect = element.getBoundingClientRect();
+
+        const visible =
+            style.display !== "none" &&
+            style.visibility !== "hidden" &&
+            Number(style.opacity) > 0 &&
+            rect.width > 0 &&
+            rect.height > 0;
+
+        const disabled =
+            element.disabled === true ||
+            element.getAttribute("aria-disabled") === "true";
+
+        let unobstructed = false;
+
+        if (visible) {
+
+            const x = rect.left + rect.width / 2;
+            const y = rect.top + rect.height / 2;
+
+            const topElement = document.elementFromPoint(x, y);
+
+            unobstructed =
+                topElement === element ||
+                element.contains(topElement);
+
+        }
+
+        const clickable =
+            visible &&
+            !disabled &&
+            unobstructed;
+
+        return {
+
+            index,
+
+            tag: element.tagName.toLowerCase(),
+
+            text: (element.innerText || element.textContent || "")
+                .trim()
+                .slice(0, 300),
+
+            id: element.id || "",
+
+            className:
+                typeof element.className === "string"
+                    ? element.className
+                    : "",
+
+            visible,
+
+            disabled,
+
+            unobstructed,
+
+            clickable,
+
+            status: clickable
+                ? "NOW CLICKABLE"
+                : !visible
+                    ? "HIDDEN"
+                    : disabled
+                        ? "DISABLED"
+                        : "NOT CLICKABLE",
+
+            attributes: Array.from(element.attributes).reduce(
+                (result, attribute) => {
+
+                    result[attribute.name] = attribute.value;
+
+                    return result;
+
+                },
+                {}
+            )
+
+        };
+
+    });
+
+}
+"""
+
+
+async def scan_selector(selector):
+
+    if not page:
+        raise HTTPException(
+            status_code=400,
+            detail="Browser is not running.",
+        )
+
+    try:
+
+        return await page.evaluate(
+            CLICKABILITY_SCRIPT,
+            selector,
+        )
+
+    except Exception as error:
+
+        return {
+            "error": str(error),
+            "selector": selector,
+        }
+
+
+# ============================================================
+# COMPLETE SELECTOR DIAGNOSTICS
+# ============================================================
+
+async def run_selector_diagnostics():
+
+    if not page:
+        raise HTTPException(
+            status_code=400,
+            detail="Browser is not running.",
+        )
+
+    results = []
+
+    for item in SELECTOR_LIBRARY:
+
+        selector = item["selector"]
+
+        elements = await scan_selector(selector)
+
+        if isinstance(elements, dict):
+
+            results.append({
+                **item,
+                "found": False,
+                "error": elements.get("error"),
+            })
+
+            continue
+
+        results.append({
+
+            **item,
+
+            "found": len(elements) > 0,
+
+            "count": len(elements),
+
+            "elements": elements,
+
+            "status": (
+                "FOUND"
+                if elements
+                else "NOT FOUND"
+            ),
+
+        })
+
+    return results
+
+
+# ============================================================
+# TECHNICAL INSPECTOR
+# ============================================================
+
+async def inspect_element(selector):
+
+    if not page:
+        raise HTTPException(
+            status_code=400,
+            detail="Browser is not running.",
+        )
+
+    script = """
+    (selector) => {
+
+        const element = document.querySelector(selector);
+
+        if (!element) {
+            return null;
+        }
+
+        const style = getComputedStyle(element);
+
+        const rect = element.getBoundingClientRect();
+
+        return {
+
+            selector,
+
+            tag: element.tagName.toLowerCase(),
+
+            text: (
+                element.innerText ||
+                element.textContent ||
+                ""
+            ).trim().slice(0, 1000),
+
+            id: element.id,
+
+            className: element.className,
+
+            attributes: Array.from(element.attributes).reduce(
+                (result, attribute) => {
+
+                    result[attribute.name] = attribute.value;
+
+                    return result;
+
+                },
+                {}
+            ),
+
+            visible:
+                style.display !== "none" &&
+                style.visibility !== "hidden" &&
+                rect.width > 0 &&
+                rect.height > 0,
+
+            disabled:
+                element.disabled === true,
+
+            dimensions: {
+
+                width: rect.width,
+
+                height: rect.height,
+
+                x: rect.x,
+
+                y: rect.y
+
+            },
+
+            inspectedAt: Date.now()
+
+        };
+
+    }
+    """
+
+    try:
+
+        result = await page.evaluate(
+            script,
+            selector,
+        )
+
+        if result is None:
+
+            raise HTTPException(
+                status_code=404,
+                detail="Element not found.",
+            )
+
+        return result
+
+    except HTTPException:
+        raise
+
+    except Exception as error:
+
+        raise HTTPException(
+            status_code=400,
+            detail=str(error),
+        )
+
+
+# ============================================================
+# ACTION SAFETY
+# ============================================================
+
+BLOCKED_ACTION_KEYWORDS = [
+
+    "ad",
+    "skip",
+    "reward",
+    "continue",
+    "membership",
+    "success",
+    "payment",
+    "checkout",
+    "purchase",
+    "subscribe",
+    "delete",
+    "remove",
+    "transfer",
+    "password",
+    "security",
+    "login",
+    "logout",
+
+]
+
+
+def is_detection_only_selector(selector):
+
+    normalized = selector.lower()
+
+    for item in SELECTOR_LIBRARY:
+
+        if item["selector"] == selector:
+
+            return item["detection_only"]
+
+    detection_terms = [
+
+        "linkvertise",
+        "lv-",
+        "carousel",
+        "success-wrapper",
+        "success-title",
+
+    ]
+
+    return any(
+        term in normalized
+        for term in detection_terms
+    )
+
+
+# ============================================================
+# APPROVAL PREPARATION
+# ============================================================
+
+async def prepare_safe_action(selector):
+
+    if not page:
+        raise HTTPException(
+            status_code=400,
+            detail="Browser is not running.",
+        )
+
+    if is_detection_only_selector(selector):
+
+        raise HTTPException(
+            status_code=403,
+            detail="This selector is detection-only.",
+        )
+
+    details = await inspect_element(selector)
+
+    if details["tag"] != "button":
+
+        raise HTTPException(
+            status_code=403,
+            detail="Only ordinary HTML buttons are supported.",
+        )
+
+    if details["disabled"] or not details["visible"]:
+
+        raise HTTPException(
+            status_code=400,
+            detail="Button is not available.",
+        )
+
+    button_type = details["attributes"].get(
+        "type",
+        "submit",
+    ).lower()
+
+    if button_type != "button":
+
+        raise HTTPException(
+            status_code=403,
+            detail="Submit buttons are not supported.",
+        )
+
+    text_content = details["text"].lower()
+
+    if any(
+        keyword in text_content
+        for keyword in BLOCKED_ACTION_KEYWORDS
+    ):
+
+        raise HTTPException(
+            status_code=403,
+            detail="This action is restricted.",
+        )
+
+    token = secrets.token_urlsafe(32)
+
+    pending_approvals[token] = {
+
+        "selector": selector,
+
+        "tag": details["tag"],
+
+        "text": details["text"],
+
+        "created": time.time(),
+
+        "url": page.url,
+
+    }
+
+    return {
+
+        "approval_required": True,
+
+        "approval_token": token,
+
+        "action": "Click ordinary button",
+
+        "target": details,
+
+        "risk": "Low-risk heuristic; inspect before approving.",
+
+        "expires_in": MAX_APPROVAL_AGE,
+
+    }
+
+
+# ============================================================
+# APPROVED ACTION EXECUTION
+# ============================================================
+
+async def execute_approved_action(token):
+
+    if token not in pending_approvals:
+
+        raise HTTPException(
+            status_code=404,
+            detail="Approval token not found or already used.",
+        )
+
+    approval = pending_approvals.pop(token)
+
+    if time.time() - approval["created"] > MAX_APPROVAL_AGE:
+
+        raise HTTPException(
+            status_code=403,
+            detail="Approval expired. Prepare the action again.",
+        )
+
+    if not page:
+
+        raise HTTPException(
+            status_code=400,
+            detail="Browser is not running.",
+        )
+
+    if page.url != approval["url"]:
+
+        raise HTTPException(
+            status_code=403,
+            detail="Page changed. Approval revoked.",
+        )
+
+    current = await inspect_element(
+        approval["selector"]
+    )
+
+    if (
+        current["tag"] != approval["tag"]
+        or current["text"] != approval["text"]
+        or not current["visible"]
+        or current["disabled"]
+    ):
+
+        raise HTTPException(
+            status_code=403,
+            detail="Target changed. Approval revoked.",
+        )
+
+    # Re-check detection-only status immediately before action.
+    if is_detection_only_selector(approval["selector"]):
+
+        raise HTTPException(
+            status_code=403,
+            detail="Detection-only selector.",
+        )
+
+    try:
+
+        await page.locator(
+            approval["selector"]
+        ).click(
+            timeout=3000,
+        )
+
+        await broadcast(
+            "action_completed",
+            {
+                "selector": approval["selector"],
+                "result": "completed",
+            },
+        )
+
+        await asyncio.sleep(0.2)
+
+        await broadcast(
+            "post_action_scan",
+            {
+                "url": page.url,
+                "title": await page.title(),
+            },
+        )
+
+        return {
+            "success": True,
+            "message": "Approved action completed.",
+        }
+
+    except Exception as error:
+
+        raise HTTPException(
