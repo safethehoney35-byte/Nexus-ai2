@@ -748,7 +748,17 @@ BLOCKED_ACTION_KEYWORDS = [
 ]
 
 
+def is_watch_ads_selector(selector):
+    return selector == SELECTOR_LIBRARY[0]["selector"]
+
+
 def is_detection_only_selector(selector):
+
+    # The Watch Ads choice is the only Linkvertise control that may be
+    # submitted for explicit human approval. Ad CTAs, counters, Skip Ad,
+    # reward and success controls remain detection-only.
+    if is_watch_ads_selector(selector):
+        return False
 
     normalized = selector.lower()
 
@@ -793,7 +803,38 @@ async def prepare_safe_action(selector):
             detail="This selector is detection-only.",
         )
 
-    details = await inspect_element(selector)
+    if is_watch_ads_selector(selector):
+        # This selector can match several membership choices. Never assume
+        # the first match is correct: locate the visible button whose text
+        # identifies Watch Ads, excluding Free Access.
+        candidates = await page.locator(selector).all()
+        details = None
+        for candidate in candidates:
+            try:
+                if not await candidate.is_visible():
+                    continue
+                candidate_text = " ".join((await candidate.inner_text()).split())
+                if "watch ads" not in candidate_text.lower():
+                    continue
+                if "free access" in candidate_text.lower():
+                    continue
+                if await candidate.evaluate("el => el.tagName.toLowerCase()") != "button":
+                    continue
+                details = await candidate.evaluate("""(el, selector) => ({
+                    selector: selector,
+                    tag: el.tagName.toLowerCase(),
+                    text: (el.innerText || el.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 1000),
+                    attributes: Array.from(el.attributes).reduce((o, a) => (o[a.name] = a.value, o), {}),
+                    visible: true,
+                    disabled: !!el.disabled
+                })""", selector)
+                break
+            except Exception:
+                continue
+        if details is None:
+            raise HTTPException(status_code=404, detail="Visible Watch Ads option was not found. Free Access is not eligible.")
+    else:
+        details = await inspect_element(selector)
 
     if details["tag"] != "button":
 
@@ -809,10 +850,7 @@ async def prepare_safe_action(selector):
             detail="Button is not available.",
         )
 
-    button_type = details["attributes"].get(
-        "type",
-        "submit",
-    ).lower()
+    button_type = details["attributes"].get("type", "button" if is_watch_ads_selector(selector) else "submit").lower()
 
     if button_type != "button":
 
@@ -823,10 +861,10 @@ async def prepare_safe_action(selector):
 
     text_content = details["text"].lower()
 
-    if any(
-        keyword in text_content
-        for keyword in BLOCKED_ACTION_KEYWORDS
-    ):
+    if is_watch_ads_selector(selector):
+        if "watch ads" not in text_content or "free access" in text_content:
+            raise HTTPException(status_code=403, detail="Only the Watch Ads option can be approved here.")
+    elif any(keyword in text_content for keyword in BLOCKED_ACTION_KEYWORDS):
 
         raise HTTPException(
             status_code=403,
@@ -838,6 +876,8 @@ async def prepare_safe_action(selector):
     pending_approvals[token] = {
 
         "selector": selector,
+
+        "watch_ads_only": is_watch_ads_selector(selector),
 
         "tag": details["tag"],
 
@@ -855,7 +895,7 @@ async def prepare_safe_action(selector):
 
         "approval_token": token,
 
-        "action": "Click ordinary button",
+        "action": "Select Watch Ads option" if is_watch_ads_selector(selector) else "Click ordinary button",
 
         "target": details,
 
@@ -902,9 +942,27 @@ async def execute_approved_action(token):
             detail="Page changed. Approval revoked.",
         )
 
-    current = await inspect_element(
-        approval["selector"]
-    )
+    if approval.get("watch_ads_only"):
+        current = None
+        for candidate in await page.locator(approval["selector"]).all():
+            try:
+                if not await candidate.is_visible():
+                    continue
+                candidate_text = " ".join((await candidate.inner_text()).split())
+                if "watch ads" in candidate_text.lower() and "free access" not in candidate_text.lower():
+                    current = {
+                        "tag": await candidate.evaluate("el => el.tagName.toLowerCase()"),
+                        "text": candidate_text,
+                        "visible": True,
+                        "disabled": await candidate.is_disabled(),
+                    }
+                    break
+            except Exception:
+                continue
+        if current is None:
+            raise HTTPException(status_code=403, detail="Watch Ads option disappeared. Approval revoked.")
+    else:
+        current = await inspect_element(approval["selector"])
 
     if (
         current["tag"] != approval["tag"]
@@ -920,19 +978,26 @@ async def execute_approved_action(token):
 
     # Re-check detection-only status immediately before action.
     if is_detection_only_selector(approval["selector"]):
-
-        raise HTTPException(
-            status_code=403,
-            detail="Detection-only selector.",
-        )
+        raise HTTPException(status_code=403, detail="Detection-only selector.")
 
     try:
-
-        await page.locator(
-            approval["selector"]
-        ).click(
-            timeout=3000,
-        )
+        if approval.get("watch_ads_only"):
+            target = None
+            for candidate in await page.locator(approval["selector"]).all():
+                try:
+                    if not await candidate.is_visible():
+                        continue
+                    candidate_text = " ".join((await candidate.inner_text()).split())
+                    if "watch ads" in candidate_text.lower() and "free access" not in candidate_text.lower():
+                        target = candidate
+                        break
+                except Exception:
+                    continue
+            if target is None:
+                raise RuntimeError("Watch Ads option is no longer available.")
+            await target.click(timeout=3000)
+        else:
+            await page.locator(approval["selector"]).click(timeout=3000)
 
         await broadcast(
             "action_completed",
