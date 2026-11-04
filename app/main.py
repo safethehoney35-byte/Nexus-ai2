@@ -956,7 +956,9 @@ async def execute_approved_action(token):
             "success": True,
             "message": "Approved action completed.",
         }
-
     except Exception as error:
 
         raise HTTPException(
+            status_code=500,
+            detail=f"Action failed: {str(error)}",
+        )
