@@ -79,6 +79,12 @@ textarea{min-height:95px;resize:vertical}.primary,.stop{color:white;border:0;pad
 </section>
 
 <section id="diagnostics" class="hidden">
+<div class="panel"><h2>Linkvertise Selector Diagnostic</h2>
+<p class="muted">Paste a DOM snapshot from the page you are inspecting. This runs read-only selector checks locally in this dashboard; it does not click ads, skip ads, or simulate rewards.</p>
+<textarea id="selectorHtml" placeholder="Paste page HTML snapshot here (outerHTML)..."></textarea>
+<button class="primary" onclick="runSelectorDiagnostics()">RUN SELECTOR CHECKS</button>
+<div id="selectorResults" class="diagnostic" aria-live="polite">No selector test run yet.</div>
+</div>
 <div class="panel"><h2>Action Verification</h2><p class="muted">Green means the action completed; red means it failed; amber means it was attempted but could not be confirmed.</p>
 <div id="actionSummary" class="diagnostic">No actions yet.</div><div class="activity" id="actionLog"></div></div>
 <div class="panel"><h2>Connectivity Diagnostics</h2><div id="networkInfo" class="diagnostic">Not tested yet.</div></div>
@@ -129,6 +135,35 @@ $("bottomFindings").innerHTML=`<div class="report">${esc(findings)}</div><h3>Cli
 function renderEvent(e){const box=$("activity");if(box.querySelector(".muted"))box.innerHTML="";const row=document.createElement("div");row.className="event";
 const t=document.createElement("time");t.textContent=e.time||"";const tag=document.createElement("span");tag.className="tag "+statusClass(e.status);tag.textContent=(e.status||e.category||"INFO").toUpperCase();
 const m=document.createElement("span");m.className="event-message";m.textContent=e.message||"";row.append(t,tag,m);box.prepend(row);while(box.children.length>120)box.lastElementChild.remove()}
+const selectorChecks = [
+{name:"Watch Ads option",selector:'[data-testid="lv-membership-plan-option-wrapper-btn"]',kind:"exists"},
+{name:"Continue button",selector:'[data-testid="action-wall-continue-action-btn"]',kind:"exists"},
+{name:"Ad counter",selector:'.carousel-items-counter p',kind:"text",pattern:/^\d+\s*\/\s*3$/},
+{name:"Ad label",selector:'.lv-card__ad-indicator p',kind:"text",expected:"Ad"},
+{name:"Skip Ad control (presence only)",selector:'[data-testid="lv-lib-carousel-skip-btn"]',kind:"exists"},
+{name:"Success heading",selector:'[data-testid="success-title"]',kind:"text",expected:"access creativity!"},
+{name:"Content-ready heading",selector:'.success-wrapper h2',kind:"text",expected:"Your content is ready!"},
+{name:"Open here button",selector:'.success-wrapper button',kind:"button",expected:"Open here"}
+];
+function runSelectorDiagnostics(){
+ const source=$("selectorHtml").value;
+ const out=$("selectorResults");
+ if(!source.trim()){out.textContent="Paste a DOM snapshot first.";return}
+ let doc;
+ try{doc=new DOMParser().parseFromString(source,"text/html")}catch(e){out.textContent="Could not parse the HTML snapshot.";return}
+ const rows=selectorChecks.map(check=>{
+   const el=doc.querySelector(check.selector);let pass=false,observed="Not found";
+   if(el){observed=(el.innerText||el.textContent||"").trim().replace(/\s+/g," ").slice(0,160)||el.tagName.toLowerCase();
+     if(check.kind==="exists")pass=true;
+     if(check.kind==="text")pass=check.pattern?check.pattern.test(observed):observed.toLowerCase()===check.expected.toLowerCase();
+     if(check.kind==="button")pass=el.tagName.toLowerCase()==="button"&&observed.toLowerCase()===check.expected.toLowerCase();
+   }
+   return {name:check.name,selector:check.selector,pass,observed};
+ });
+ out.innerHTML=rows.map(r=>`<div class="event"><span class="tag ${r.pass?'ok':'warn'}">${r.pass?'PASS':'NOT FOUND'}</span><span class="event-message"><strong>${esc(r.name)}</strong><br><code>${esc(r.selector)}</code><br><small>${esc(r.observed)}</small></span></div>`).join("");
+ const passed=rows.filter(r=>r.pass).length;
+ const summary=document.createElement("p");summary.className="muted";summary.textContent=`${passed}/${rows.length} checks matched this snapshot. Checks for other page stages are expected to be absent.`;out.prepend(summary);
+}
 function connect(){const proto=location.protocol==="https:"?"wss:":"ws:";socket=new WebSocket(`${proto}//${location.host}/ws`);
 socket.onopen=()=>{$("connection").textContent="● CONNECTED";socket.send(JSON.stringify({type:"layer",layer:currentLayer}))};
 socket.onmessage=m=>{const d=JSON.parse(m.data);if(d.type==="state"){renderState(d.state);if(d.events){$("activity").innerHTML="";d.events.forEach(renderEvent)}}
