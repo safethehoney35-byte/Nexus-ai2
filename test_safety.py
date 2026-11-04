@@ -1,5 +1,5 @@
 import unittest
-from main import BLOCKED_TERMS, DETECTION_ONLY
+from app.main import BLOCKED_TERMS, DETECTION_ONLY
 
 class SafetyRulesTest(unittest.TestCase):
     def test_linkvertise_selectors_are_detection_only(self):
