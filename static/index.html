@@ -1153,57 +1153,860 @@ function handleSocketEvent(message) {
 
         default:
 
-            log("EvextContent=s.plan?JSON.stringify(s.plan,null,2):"No plan yet.";
-const a=s.sources||[];$("sources").innerHTML=a.length?a.map(x=>`<div class="source"><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.title||"Untitled source")}</a><small>${esc(x.status)}</small><small>${esc(x.url)}</small></div>`).join(""):'<p class="muted">No sources collected yet.</p>';
-const imgs=s.images||[];$("imageCount").textContent=imgs.length;$("imageStatus").textContent=imgs.length?`${imgs.length} image URL(s) extracted. Previews load separately and may depend on the source site's hotlink policy.`:"No image URLs extracted yet.";
-$("imageGrid").innerHTML=imgs.map(x=>`<div class="image-card"><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer"><img loading="lazy" src="${esc(x.url)}" alt="${esc(x.alt)}" onerror="this.style.opacity='.25';this.title='Preview unavailable; open original URL'"></a><small>${esc(x.alt||"Image")}</small><small>${esc(x.width)} × ${esc(x.height)}</small><small><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">Open original image ↗</a></small></div>`).join("");
-const acts=s.actions||[];const counts={success:0,failed:0,warning:0};acts.forEach(x=>{let st=(x.status||"").toLowerCase();if(st==="success")counts.success++;else if(st==="failed"||st==="error")counts.failed++;else if(st==="warning")counts.warning++;});
-$("successCount").textContent=counts.success;$("failedCount").textContent=counts.failed;$("warningCount").textContent=counts.warning;
-$("actionSummary").innerHTML=`<span class="ok">🟢 ${counts.success} successful</span> &nbsp; <span class="bad">🔴 ${counts.failed} failed</span> &nbsp; <span class="warn">🟡 ${counts.warning} unverified/warnings</span>`;
-$("actionLog").innerHTML=acts.slice().reverse().map(x=>`<div class="event"><time>${esc(x.time)}</time><span class="tag ${statusClass(x.status)}">${esc((x.status||"info").toUpperCase())}</span><span class="event-message">${esc(x.message)}</span></div>`).join("");
-const net=s.network||{};$("networkInfo").innerHTML=(net.checks||[]).map(c=>`<div class="${c.ok?'ok':'bad'}">${c.ok?'🟢':'🔴'} ${esc(c.host)} — ${c.ok?'reachable':'not reachable'} — ${esc(c.ms)} ms ${esc(c.error||'')}</div>`).join("")+`<p>${esc(net.note||"Connectivity check not run.")}</p>`;
-$("report").textContent=s.report||"Report not ready.";
-$("bottomStatus").textContent=`Status: ${(s.status||"idle").toUpperCase()} · Collected ${s.collected||0}/${s.target||0} · Analysed ${s.analysed||0} · Elapsed ${s.elapsed||0}s`;
-let findings=s.report||"No final report yet.";let links=a.map(x=>`<p><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.title||x.url)}</a></p>`).join("");
-$("bottomFindings").innerHTML=`<div class="report">${esc(findings)}</div><h3>Clickable original sources</h3>${links||'<span class="muted">No verified source links collected.</span>'}`;
+            log("Event received: " + message.type);
+
+    }
+
 }
-function renderEvent(e){const box=$("activity");if(box.querySelector(".muted"))box.innerHTML="";const row=document.createElement("div");row.className="event";
-const t=document.createElement("time");t.textContent=e.time||"";const tag=document.createElement("span");tag.className="tag "+statusClass(e.status);tag.textContent=(e.status||e.category||"INFO").toUpperCase();
-const m=document.createElement("span");m.className="event-message";m.textContent=e.message||"";row.append(t,tag,m);box.prepend(row);while(box.children.length>120)box.lastElementChild.remove()}
-const selectorChecks = [
-{name:"Watch Ads option",selector:'[data-testid="lv-membership-plan-option-wrapper-btn"]',kind:"exists"},
-{name:"Continue button",selector:'[data-testid="action-wall-continue-action-btn"]',kind:"exists"},
-{name:"Ad counter",selector:'.carousel-items-counter p',kind:"text",pattern:/^\d+\s*\/\s*3$/},
-{name:"Ad label",selector:'.lv-card__ad-indicator p',kind:"text",expected:"Ad"},
-{name:"Skip Ad control (presence only)",selector:'[data-testid="lv-lib-carousel-skip-btn"]',kind:"exists"},
-{name:"Success heading",selector:'[data-testid="success-title"]',kind:"text",expected:"access creativity!"},
-{name:"Content-ready heading",selector:'.success-wrapper h2',kind:"text",expected:"Your content is ready!"},
-{name:"Open here button",selector:'.success-wrapper button',kind:"button",expected:"Open here"}
-];
-function runSelectorDiagnostics(){
- const source=$("selectorHtml").value;
- const out=$("selectorResults");
- if(!source.trim()){out.textContent="Paste a DOM snapshot first.";return}
- let doc;
- try{doc=new DOMParser().parseFromString(source,"text/html")}catch(e){out.textContent="Could not parse the HTML snapshot.";return}
- const rows=selectorChecks.map(check=>{
-   const el=doc.querySelector(check.selector);let pass=false,observed="Not found";
-   if(el){observed=(el.innerText||el.textContent||"").trim().replace(/\s+/g," ").slice(0,160)||el.tagName.toLowerCase();
-     if(check.kind==="exists")pass=true;
-     if(check.kind==="text")pass=check.pattern?check.pattern.test(observed):observed.toLowerCase()===check.expected.toLowerCase();
-     if(check.kind==="button")pass=el.tagName.toLowerCase()==="button"&&observed.toLowerCase()===check.expected.toLowerCase();
-   }
-   return {name:check.name,selector:check.selector,pass,observed};
- });
- out.innerHTML=rows.map(r=>`<div class="event"><span class="tag ${r.pass?'ok':'warn'}">${r.pass?'PASS':'NOT FOUND'}</span><span class="event-message"><strong>${esc(r.name)}</strong><br><code>${esc(r.selector)}</code><br><small>${esc(r.observed)}</small></span></div>`).join("");
- const passed=rows.filter(r=>r.pass).length;
- const summary=document.createElement("p");summary.className="muted";summary.textContent=`${passed}/${rows.length} checks matched this snapshot. Checks for other page stages are expected to be absent.`;out.prepend(summary);
+
+
+/* =========================================================
+   STATUS
+========================================================= */
+
+async function refreshStatus() {
+
+    try {
+
+        const data = await api("/api/status");
+
+        browserRunning = data.browser_running;
+
+        updateBrowserStatus();
+
+        document.getElementById("activeUrl")
+            .textContent = data.active_url || "None";
+
+        document.getElementById("approvalCount")
+            .textContent = data.pending_approvals || 0;
+
+    } catch (error) {
+
+        log(error.message, "ERROR");
+
+    }
+
 }
-function connect(){const proto=location.protocol==="https:"?"wss:":"ws:";socket=new WebSocket(`${proto}//${location.host}/ws`);
-socket.onopen=()=>{$("connection").textContent="● CONNECTED";socket.send(JSON.stringify({type:"layer",layer:currentLayer}))};
-socket.onmessage=m=>{const d=JSON.parse(m.data);if(d.type==="state"){renderState(d.state);if(d.events){$("activity").innerHTML="";d.events.forEach(renderEvent)}}
-if(d.type==="event")renderEvent(d.event);if(d.type==="screenshot"&&currentLayer===3)$("browserImage").src="data:image/jpeg;base64,"+d.image};
-socket.onclose=()=>{$("connection").textContent="● RECONNECTING";setTimeout(connect,3000)}}
-async function refresh(){try{const r=await fetch("/api/status");const d=await r.json();renderState(d.state)}catch(e){}}
-connect();refresh();setInterval(refresh,3000);
-</script></body></html>
+
+
+function updateBrowserStatus() {
+
+    document.getElementById("browserStatus")
+        .textContent =
+        browserRunning ? "Running" : "Stopped";
+
+}
+
+
+/* =========================================================
+   START BROWSER
+========================================================= */
+
+async function startBrowser() {
+
+    const url =
+        document.getElementById("quickUrl").value.trim();
+
+    try {
+
+        const payload = {};
+
+        if (url) {
+            payload.url = url;
+        }
+
+        const data = await api("/api/start", {
+
+            method: "POST",
+
+            body: JSON.stringify(payload)
+
+        });
+
+        browserRunning = true;
+
+        updateBrowserStatus();
+
+        log("Browser started successfully", "SUCCESS");
+
+        if (data.url) {
+
+            document.getElementById("activeUrl")
+                .textContent = data.url;
+
+        }
+
+        await refreshStatus();
+
+    } catch (error) {
+
+        log(error.message, "ERROR");
+
+        alert(error.message);
+
+    }
+
+}
+
+
+/* =========================================================
+   STOP BROWSER
+========================================================= */
+
+async function stopBrowser() {
+
+    try {
+
+        await api("/api/stop", {
+
+            method: "POST",
+
+            body: JSON.stringify({})
+
+        });
+
+        browserRunning = false;
+
+        updateBrowserStatus();
+
+        detectedElements = [];
+
+        selectedElementIndex = -1;
+
+        document.getElementById("elementList").innerHTML =
+            '<div class="empty">Browser stopped.</div>';
+
+        log("Browser stopped", "WARNING");
+
+        await refreshStatus();
+
+    } catch (error) {
+
+        log(error.message, "ERROR");
+
+    }
+
+}
+
+
+/* =========================================================
+   NAVIGATE
+========================================================= */
+
+async function navigateBrowser() {
+
+    const url =
+        document.getElementById("browserUrl").value.trim();
+
+    if (!url) {
+        alert("Enter a URL first.");
+        return;
+    }
+
+    try {
+
+        const data = await api("/api/navigate", {
+
+            method: "POST",
+
+            body: JSON.stringify({
+                url
+            })
+
+        });
+
+        document.getElementById("activeUrl")
+            .textContent = data.url;
+
+        document.getElementById("browserInfo")
+            .textContent = data.title;
+
+        log("Navigated to " + data.url, "SUCCESS");
+
+        await scanElements();
+
+    } catch (error) {
+
+        log(error.message, "ERROR");
+
+        alert(error.message);
+
+    }
+
+}
+
+
+/* =========================================================
+   ELEMENT SCAN
+========================================================= */
+
+async function scanElements() {
+
+    try {
+
+        const data = await api("/api/dom/scan");
+
+        detectedElements = data.elements || [];
+
+        selectedElementIndex =
+            detectedElements.length > 0 ? 0 : -1;
+
+        document.getElementById("elementCount")
+            .textContent = detectedElements.length;
+
+        renderElements();
+
+        log(
+            detectedElements.length +
+            " elements detected"
+        );
+
+        return data;
+
+    } catch (error) {
+
+        log(error.message, "ERROR");
+
+        throw error;
+
+    }
+
+}
+
+
+/* =========================================================
+   RENDER ELEMENTS
+========================================================= */
+
+function renderElements() {
+
+    const container =
+        document.getElementById("elementList");
+
+    container.innerHTML = "";
+
+    if (!detectedElements.length) {
+
+        container.innerHTML =
+            '<div class="empty">No elements found.</div>';
+
+        document.getElementById("elementNavigation")
+            .textContent = "0 elements";
+
+        return;
+
+    }
+
+    detectedElements.forEach((element, index) => {
+
+        const item = document.createElement("div");
+
+        item.className = "element-item";
+
+        if (index === selectedElementIndex) {
+            item.classList.add("selected");
+        }
+
+        const title = document.createElement("strong");
+
+        title.textContent =
+            `${index + 1}. <${element.tag}>`;
+
+        const text = document.createElement("div");
+
+        text.className = "muted";
+
+        text.textContent =
+            element.text || "(No text)";
+
+        const status = document.createElement("div");
+
+        status.style.marginTop = "8px";
+
+        status.textContent = element.status;
+
+        status.style.color =
+            element.clickable
+                ? "var(--green)"
+                : "var(--yellow)";
+
+        item.append(
+            title,
+            text,
+            status
+        );
+
+        item.addEventListener("click", () => {
+
+            selectedElementIndex = index;
+
+            renderElements();
+
+            showSelectedElement();
+
+        });
+
+        container.appendChild(item);
+
+    });
+
+    document.getElementById("elementNavigation")
+        .textContent =
+        `${selectedElementIndex + 1} / ${detectedElements.length}`;
+
+    showSelectedElement();
+
+}
+
+
+/* =========================================================
+   PREVIOUS / NEXT
+========================================================= */
+
+function previousElement() {
+
+    if (!detectedElements.length) {
+        return;
+    }
+
+    selectedElementIndex--;
+
+    if (selectedElementIndex < 0) {
+        selectedElementIndex = detectedElements.length - 1;
+    }
+
+    renderElements();
+
+}
+
+
+function nextElement() {
+
+    if (!detectedElements.length) {
+        return;
+    }
+
+    selectedElementIndex++;
+
+    if (selectedElementIndex >= detectedElements.length) {
+        selectedElementIndex = 0;
+    }
+
+    renderElements();
+
+}
+
+
+/* =========================================================
+   SELECTED ELEMENT
+========================================================= */
+
+function showSelectedElement() {
+
+    const element =
+        detectedElements[selectedElementIndex];
+
+    if (!element) {
+        return;
+    }
+
+    document.getElementById("inspectSelector")
+        .value = element.id
+            ? "#" + CSS.escape(element.id)
+            : element.tag;
+
+}
+
+
+/* =========================================================
+   INSPECTOR
+========================================================= */
+
+async function inspectElement() {
+
+    const selector =
+        document.getElementById("inspectSelector")
+            .value.trim();
+
+    if (!selector) {
+        alert("Enter a CSS selector.");
+        return;
+    }
+
+    try {
+
+        const data = await api("/api/inspect", {
+
+            method: "POST",
+
+            body: JSON.stringify({
+                selector
+            })
+
+        });
+
+        renderInspector(data.element);
+
+        log("Element inspected: " + selector);
+
+    } catch (error) {
+
+        log(error.message, "ERROR");
+
+        alert(error.message);
+
+    }
+
+}
+
+
+function renderInspector(element) {
+
+    const output =
+        document.getElementById("inspectorOutput");
+
+    output.innerHTML = "";
+
+    const fields = {
+
+        Selector: element.selector,
+
+        Tag: element.tag,
+
+        Text: element.text,
+
+        ID: element.id,
+
+        Class: element.className,
+
+        Visible: element.visible,
+
+        Disabled: element.disabled,
+
+        Dimensions: JSON.stringify(element.dimensions),
+
+        Attributes: JSON.stringify(element.attributes),
+
+        "Inspected At": new Date(
+            element.inspectedAt
+        ).toLocaleString()
+
+    };
+
+    Object.entries(fields).forEach(([key, value]) => {
+
+        const row = document.createElement("div");
+
+        row.className = "inspector-row";
+
+        const label = document.createElement("strong");
+
+        label.textContent = key + ": ";
+
+        const content = document.createElement("span");
+
+        content.textContent =
+            String(value ?? "");
+
+        row.append(label, content);
+
+        output.appendChild(row);
+
+    });
+
+}
+
+
+/* =========================================================
+   DIAGNOSTICS
+========================================================= */
+
+async function runDiagnostics() {
+
+    try {
+
+        const data = await api(
+            "/api/diagnostics/selectors"
+        );
+
+        renderDiagnostics(data.results || []);
+
+        renderAdResults(data.results || []);
+
+        log(
+            "Diagnostics completed: " +
+            data.total +
+            " selectors"
+        );
+
+    } catch (error) {
+
+        log(error.message, "ERROR");
+
+        alert(error.message);
+
+    }
+
+}
+
+
+function renderDiagnostics(results) {
+
+    const container =
+        document.getElementById("diagnosticResults");
+
+    container.innerHTML = "";
+
+    const table = document.createElement("table");
+
+    const header = document.createElement("tr");
+
+    [
+        "Name",
+        "Category",
+        "Found",
+        "Count",
+        "Status",
+        "Mode"
+    ].forEach(label => {
+
+        const th = document.createElement("th");
+
+        th.textContent = label;
+
+        header.appendChild(th);
+
+    });
+
+    table.appendChild(header);
+
+    results.forEach(item => {
+
+        const row = document.createElement("tr");
+
+        const values = [
+
+            item.name,
+
+            item.category,
+
+            item.found ? "Yes" : "No",
+
+            item.count ?? 0,
+
+            item.status || "ERROR",
+
+            item.detection_only
+                ? "Detection only"
+                : "Standard"
+
+        ];
+
+        values.forEach(value => {
+
+            const td = document.createElement("td");
+
+            td.textContent = String(value);
+
+            row.appendChild(td);
+
+        });
+
+        table.appendChild(row);
+
+    });
+
+    container.appendChild(table);
+
+}
+
+
+function renderAdResults(results) {
+
+    const container =
+        document.getElementById("adResults");
+
+    container.innerHTML = "";
+
+    const adItems = results.filter(item =>
+        item.category === "ad_reward_detection"
+    );
+
+    if (!adItems.length) {
+
+        container.textContent =
+            "No detection results available.";
+
+        return;
+
+    }
+
+    adItems.forEach(item => {
+
+        const box = document.createElement("div");
+
+        box.className = "element-item";
+
+        const title = document.createElement("strong");
+
+        title.textContent = item.name;
+
+        const status = document.createElement("div");
+
+        status.className = "muted";
+
+        status.textContent =
+            item.found
+                ? `Detected (${item.count})`
+                : "Not found";
+
+        const mode = document.createElement("div");
+
+        mode.textContent = "Detection only";
+
+        mode.style.color = "var(--yellow)";
+
+        box.append(title, status, mode);
+
+        container.appendChild(box);
+
+    });
+
+}
+
+
+/* =========================================================
+   PREPARE ACTION
+========================================================= */
+
+async function prepareAction() {
+
+    const selector =
+        document.getElementById("actionSelector")
+            .value.trim();
+
+    if (!selector) {
+        alert("Enter an element selector.");
+        return;
+    }
+
+    try {
+
+        const data = await api(
+            "/api/action/prepare",
+            {
+
+                method: "POST",
+
+                body: JSON.stringify({
+                    selector
+                })
+
+            }
+        );
+
+        currentApprovalToken =
+            data.approval_token;
+
+        const preview =
+            document.getElementById("approvalPreview");
+
+        preview.innerHTML = "";
+
+        const fields = {
+
+            Action: data.action,
+
+            Selector: data.target.selector,
+
+            Target: data.target.text,
+
+            Risk: data.risk,
+
+            "Expires In": data.expires_in + " seconds"
+
+        };
+
+        Object.entries(fields).forEach(([key, value]) => {
+
+            const row = document.createElement("div");
+
+            row.className = "inspector-row";
+
+            const label = document.createElement("strong");
+
+            label.textContent = key + ": ";
+
+            const content = document.createElement("span");
+
+            content.textContent = String(value ?? "");
+
+            row.append(label, content);
+
+            preview.appendChild(row);
+
+        });
+
+        document.getElementById("approvalButtons")
+            .style.display = "block";
+
+        document.getElementById("approvalCount")
+            .textContent = "1";
+
+        clearTimeout(approvalTimer);
+
+        approvalTimer = setTimeout(() => {
+
+            rejectAction();
+
+            log(
+                "Approval expired",
+                "WARNING"
+            );
+
+        }, data.expires_in * 1000);
+
+        log(
+            "Approval requested",
+            "WARNING"
+        );
+
+    } catch (error) {
+
+        log(error.message, "ERROR");
+
+        alert(error.message);
+
+    }
+
+}
+
+
+/* =========================================================
+   APPROVE ACTION
+========================================================= */
+
+async function approveAction() {
+
+    if (!currentApprovalToken) {
+        alert("No pending approval.");
+        return;
+    }
+
+    const token = currentApprovalToken;
+
+    try {
+
+        const data = await api(
+            "/api/action/execute",
+            {
+
+                method: "POST",
+
+                body: JSON.stringify({
+
+                    approval_token: token
+
+                })
+
+            }
+        );
+
+        log(
+            data.message || "Action completed",
+            "SUCCESS"
+        );
+
+        rejectAction();
+
+        await scanElements();
+
+        await refreshStatus();
+
+    } catch (error) {
+
+        log(error.message, "ERROR");
+
+        alert(error.message);
+
+        rejectAction();
+
+    }
+
+}
+
+
+/* =========================================================
+   REJECT ACTION
+========================================================= */
+
+function rejectAction() {
+
+    currentApprovalToken = null;
+
+    clearTimeout(approvalTimer);
+
+    document.getElementById("approvalButtons")
+        .style.display = "none";
+
+    document.getElementById("approvalPreview")
+        .textContent =
+        "No action awaiting approval.";
+
+    document.getElementById("approvalCount")
+        .textContent = "0";
+
+}
+
+
+/* =========================================================
+   KEYBOARD NAVIGATION
+========================================================= */
+
+document.addEventListener("keydown", event => {
+
+    if (
+        event.target.tagName === "INPUT" ||
+        event.target.tagName === "TEXTAREA"
+    ) {
+        return;
+    }
+
+    if (event.key === "ArrowRight") {
+        nextElement();
+    }
+
+    if (event.key === "ArrowLeft") {
+        previousElement();
+    }
+
+});
+
+
+/* =========================================================
+   INITIALIZATION
+========================================================= */
+
+async function initialize() {
+
+    connectWebSocket();
+
+    await refreshStatus();
+
+    log("Nexus AI dashboard initialized");
+
+}
+
+
+initialize();
+
+setInterval(() => {
+
+    refreshStatus();
+
+}, 15000);
+
+</script>
+
+</body>
+</html>
