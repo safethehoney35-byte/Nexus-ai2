@@ -5,144 +5,126 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NEXUS AI · Browser Monitor</title>
     <style>
-        body { font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif; background: #090d16; color: #e2e8f0; margin: 0; padding: 30px; }
-        .dashboard { max-width: 1000px; margin: 0 auto; background: #111827; border: 1px solid #1f2937; border-radius: 12px; padding: 30px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.7); }
-        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1f2937; padding-bottom: 20px; margin-bottom: 25px; }
-        h1 { margin: 0; font-size: 24px; color: #fff; font-weight: 600; letter-spacing: -0.5px; }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: #070a13; color: #cbd5e1; margin: 0; padding: 25px; }
+        .dashboard-container { max-width: 950px; margin: 0 auto; background: #0f172a; border: 1px solid #1e293b; border-radius: 10px; padding: 25px; }
+        .dashboard-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 15px; margin-bottom: 20px; }
+        h1 { margin: 0; font-size: 22px; color: #fff; }
         h1 span { color: #3b82f6; }
-        .badge { background: #ef4444; color: white; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; }
-        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 25px; }
-        .panel { background: #0b0f19; border: 1px solid #1f2937; border-radius: 8px; padding: 20px; }
-        h2 { font-size: 16px; margin-top: 0; color: #94a3b8; font-weight: 500; }
-        input[type="text"], input[type="password"] { width: 100%; padding: 12px; background: #090d16; border: 1px solid #334155; border-radius: 6px; color: white; box-sizing: border-box; font-size: 14px; margin-bottom: 15px; }
-        .btn-group { display: flex; gap: 10px; margin-bottom: 20px; }
-        button { flex: 1; padding: 12px; font-weight: 600; border-radius: 6px; cursor: pointer; border: none; font-size: 14px; transition: background 0.2s; }
-        .btn-start { background: #2563eb; color: white; }
-        .btn-start:hover { background: #1d4ed8; }
-        .btn-stop { background: #374151; color: #94a3b8; }
-        .state-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #1e293b; font-size: 14px; }
-        .state-val { font-family: monospace; color: #38bdf8; font-weight: 600; }
-        .state-val.success { color: #34d399; }
-        .log-box { background: #090d16; border: 1px solid #1e293b; border-radius: 6px; padding: 12px; font-family: monospace; font-size: 12px; color: #a7f3d0; height: 150px; overflow-y: auto; white-space: pre-wrap; }
-        .diagnostic-box { background: #090d16; border: 1px solid #1e293b; border-radius: 6px; padding: 12px; font-family: monospace; font-size: 12px; color: #94a3b8; height: 100px; overflow-y: auto; }
+        .status-pill { background: #334155; color: #94a3b8; padding: 5px 12px; border-radius: 15px; font-size: 11px; font-weight: bold; letter-spacing: 0.5px; }
+        .panel-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .control-block { background: #0b0f19; border: 1px solid #1e293b; border-radius: 8px; padding: 20px; }
+        input[type="text"] { width: 100%; padding: 12px; background: #070a13; border: 1px solid #334155; border-radius: 6px; color: white; box-sizing: border-box; font-size: 14px; margin-top: 5px; margin-bottom: 15px; }
+        .action-flex { display: flex; gap: 10px; margin-bottom: 15px; }
+        button { flex: 1; padding: 12px; font-weight: bold; border-radius: 6px; cursor: pointer; border: none; font-size: 14px; }
+        .btn-run { background: #2563eb; color: white; }
+        .btn-run:hover { background: #1d4ed8; }
+        .btn-kill { background: #1e293b; color: #64748b; }
+        .data-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #1e293b; font-size: 14px; }
+        .data-val { font-family: monospace; color: #38bdf8; font-weight: bold; }
+        .terminal-box { background: #070a13; border: 1px solid #1e293b; border-radius: 6px; padding: 12px; font-family: monospace; font-size: 12px; color: #34d399; height: 180px; overflow-y: auto; white-space: pre-wrap; }
     </style>
 </head>
 <body>
 
-<div class="dashboard">
-    <div class="header">
-        <h1>NEXUS <span>AI</span> · Browser Monitor</h1>
-        <div class="badge" id="status-badge">STOPPED</div>
+<div class="dashboard-container">
+    <div class="dashboard-header">
+        <h1>NEXUS <span>AI</span> · Security Pipeline</h1>
+        <div class="status-pill" id="monitor-badge">STANDBY</div>
     </div>
 
-    <div class="grid">
-        <!-- Left Panel: Browser Control -->
-        <div class="panel">
-            <h2>Browser Control</h2>
-            <p style="font-size: 13px; color: #64748b; margin-top: -5px; margin-bottom: 15px;">Connect to a public website to run an isolated, randomized stealth profile engine sequence.</p>
+    <div class="panel-grid">
+        <div class="control-block">
+            <h2 style="font-size: 15px; color: #94a3b8; margin: 0 0 15px 0;">Automation Target Vectors</h2>
+            <label style="font-size: 12px; color: #64748b;">Target Destination URL</label>
+            <input type="text" id="routeUrl" value="https://sannysoft.com">
             
-            <label style="font-size: 12px; color: #94a3b8; display:block; margin-bottom:5px;">Target Destination URL</label>
-            <input type="text" id="targetUrl" placeholder="https://example.com" value="https://sannysoft.com">
-            
-            <div class="btn-group">
-                <button class="btn-start" onclick="dispatchStealthEngine()">Start</button>
-                <button class="btn-stop" onclick="resetMonitor()">Stop</button>
+            <div class="action-flex">
+                <button class="btn-run" onclick="triggerAutomationPipeline()">Initialize Engine</button>
+                <button class="btn-kill" onclick="shutdownMonitorState()">Reset System</button>
             </div>
 
-            <div class="state-row"><span>Browser State</span><span class="state-val" id="browser-state" style="color:#ef4444;">Stopped</span></div>
-            <div class="state-row"><span>Active OS Match</span><span class="state-val" id="meta-os">—</span></div>
-            <div class="state-row"><span>Spoofed GPU Core</span><span class="state-val" id="meta-gpu">—</span></div>
-            <div class="state-row"><span>Canvas Resolution</span><span class="state-val" id="meta-res">—</span></div>
-            <div class="state-row"><span>Cognitive Delay Spent</span><span class="state-val" id="meta-delay">—</span></div>
-            <div class="state-row"><span>Current Page Title</span><span class="state-val success" id="current-page">—</span></div>
+            <div class="data-row"><span>Engine Pipeline State</span><span class="data-val" id="engine-state" style="color:#64748b;">Idle</span></div>
+            <div class="data-row"><span>Masked Operating System</span><span class="data-val" id="ui-os">—</span></div>
+            <div class="data-row"><span>Intercepted GPU String</span><span class="data-val" id="ui-gpu">—</span></div>
+            <div class="data-row"><span>Viewport Boundaries</span><span class="data-val" id="ui-res">—</span></div>
+            <div class="data-row"><span>Applied Context Latency</span><span class="data-val" id="ui-delay">—</span></div>
+            <div class="data-row"><span>Evaluated Page Title</span><span class="data-val" id="ui-title" style="color:#34d399;">—</span></div>
         </div>
 
-        <!-- Right Panel: Logs & Diagnostics -->
-        <div class="panel" style="display: flex; flex-direction: column; gap: 15px;">
+        <div class="control-block" style="display:flex; flex-direction:column; justify-content:space-between;">
             <div>
-                <h2>Activity Log <span style="font-size:10px; color:#34d399; background:rgba(52,211,153,0.1); padding:2px 6px; border-radius:4px; margin-left:5px;">Live</span></h2>
-                <div class="log-box" id="activity-log">System clear. Awaiting pipeline initialization parameters...</div>
-            </div>
-
-            <div>
-                <h2>Secure System Access</h2>
-                <input type="password" id="accessKey" placeholder="Enter NEXUS_ACCESS_KEY if required" value="">
-            </div>
-            
-            <div>
-                <h2>Error & Diagnostic Log</h2>
-                <div class="diagnostic-box" id="error-log">No diagnostic warnings flags caught. Integrity status: Green.</div>
+                <h2 style="font-size: 15px; color: #94a3b8; margin: 0 0 10px 0;">Pipeline Operations Log</h2>
+                <div class="terminal-box" id="terminal-log">System pipeline initialized in standby matrix mode. Awaiting verification target links...</div>
             </div>
         </div>
     </div>
 </div>
 
 <script>
-    async function dispatchStealthEngine() {
-        const urlInput = document.getElementById('targetUrl').value;
-        const statusBadge = document.getElementById('status-badge');
-        const bState = document.getElementById('browser-state');
-        const log = document.getElementById('activity-log');
-        const errLog = document.getElementById('error-log');
+    async function triggerAutomationPipeline() {
+        const urlField = document.getElementById('routeUrl').value;
+        const badge = document.getElementById('monitor-badge');
+        const stateDisplay = document.getElementById('engine-state');
+        const logBox = document.getElementById('terminal-log');
         
-        if(!urlInput) {
-            alert("Please input a destination site URL path first.");
+        if(!urlField) {
+            alert("Please provide a destination target URL vector first.");
             return;
         }
 
-        // Updating UI to working parameters
-        statusBadge.innerText = "RUNNING";
-        statusBadge.style.background = "#2563eb";
-        bState.innerText = "Initializing Armour Matrix...";
-        bState.style.color = "#3b82f6";
-        log.innerText = `[NEXUS Initialized] -> Pulling dynamic profiles from core framework layers...\n[Pipeline] Dispatching isolated background Chromium engine sequence to target: ${urlInput}\n`;
+        badge.innerText = "PROCESSING";
+        badge.style.background = "#2563eb";
+        badge.style.color = "#fff";
+        stateDisplay.innerText = "Deploying Camouflage Context...";
+        stateDisplay.style.color = "#3b82f6";
+        logBox.innerText = `[Pipeline Dispatch] -> Connecting to isolated internal browser instances...\n[Matrix] Injecting hardware WebGL context proxies & orientation loops...\n[Navigation] Pushing header maps towards target vector: ${urlField}\n`;
 
         try {
-            const response = await fetch('/api/run', {
+            const serverResponse = await fetch('/api/run', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url: urlInput })
+                body: JSON.stringify({ url: urlField })
             });
-            const data = await response.json();
+            const payload = await serverResponse.json();
 
-            if(data.status === "success") {
-                statusBadge.innerText = "SUCCESS";
-                statusBadge.style.background = "#10b981";
-                bState.innerText = "Completed Successfully";
-                bState.style.color = "#10b981";
+            if(payload.status === "success") {
+                badge.innerText = "ACTIVE";
+                badge.style.background = "#10b981";
+                stateDisplay.innerText = "Execution Loop Complete";
+                stateDisplay.style.color = "#10b981";
                 
-                // Updating metadata allocation counters
-                document.getElementById('meta-os').innerText = data.profile_used.os.toUpperCase();
-                document.getElementById('meta-gpu').innerText = data.profile_used.gpu;
-                document.getElementById('meta-res').innerText = data.profile_used.resolution;
-                document.getElementById('meta-delay').innerText = data.profile_used.delay_spent;
-                document.getElementById('current-page').innerText = data.title || "No Title Tag Found";
+                document.getElementById('ui-os').innerText = payload.profile_used.os.toUpperCase();
+                document.getElementById('ui-gpu').innerText = payload.profile_used.gpu;
+                document.getElementById('ui-res').innerText = payload.profile_used.resolution;
+                document.getElementById('ui-delay').innerText = payload.profile_used.delay_spent;
+                document.getElementById('ui-title').innerText = payload.title || "No Bounding String Found";
 
-                log.innerText += `[Success] Handshake matched. HTTP Status Frame Code: ${data.http_code}\n[Armour Details] OS Matrix: ${data.profile_used.os} | Hardware GPU Mask applied: ${data.profile_used.gpu}\n[Timing Tunnel] Simulated cognitive pause duration spent: ${data.profile_used.delay_spent}\n[Pipeline System] Clean tear-down completed successfully. Profile destroyed to bypass persistent tracing tracking trackers tracking trackers.`;
+                logBox.innerText += `[Handshake Match] Server returned status code context frame: ${payload.http_code}\n[Armour Info] Allocation OS type: ${payload.profile_used.os} | Applied GPU Layer Mask: ${payload.profile_used.gpu}\n[Tunnel Delay] Behavioral processing spent: ${payload.profile_used.delay_spent}\n[System Blueprint] Isolation core context completely destroyed to block cross-session tracking variables.`;
             } else {
-                throw new Error(data.message || "Failed execution loop runtime parameter error.");
+                throw new Error(payload.message || "Execution engine met unhandled background exception.");
             }
-        } catch (err) {
-            statusBadge.innerText = "FAILED";
-            statusBadge.style.background = "#ef4444";
-            bState.innerText = "Error Flags Raised";
-            bState.style.color = "#ef4444";
-            log.innerText += `[-] Runtime automation instance execution cracked.\n`;
-            errLog.innerText = `[Alert Warning Exception] ${err.message}`;
+        } catch (error) {
+            badge.innerText = "CRACKED";
+            badge.style.background = "#ef4444";
+            stateDisplay.innerText = "Pipeline Interrupted";
+            stateDisplay.style.color = "#ef4444";
+            logBox.innerText += `[-] Critical failure during stealth execution mapping routine.\n`;
+            console.error(error);
         }
     }
 
-    function resetMonitor() {
-        document.getElementById('status-badge').innerText = "STOPPED";
-        document.getElementById('status-badge').style.background = "#ef4444";
-        document.getElementById('browser-state').innerText = "Stopped";
-        document.getElementById('browser-state').style.color = "#ef4444";
-        document.getElementById('meta-os').innerText = "—";
-        document.getElementById('meta-gpu').innerText = "—";
-        document.getElementById('meta-res').innerText = "—";
-        document.getElementById('meta-delay').innerText = "—";
-        document.getElementById('current-page').innerText = "—";
-        document.getElementById('activity-log').innerText = "System reset triggered. Monitor returned to fresh pipeline state.";
-    </script>
+    function shutdownMonitorState() {
+        document.getElementById('monitor-badge').innerText = "STANDBY";
+        document.getElementById('monitor-badge').style.background = "#334155";
+        document.getElementById('engine-state').innerText = "Idle";
+        document.getElementById('engine-state').style.color = "#64748b";
+        document.getElementById('ui-os').innerText = "—";
+        document.getElementById('ui-gpu').innerText = "—";
+        document.getElementById('ui-res').innerText = "—";
+        document.getElementById('ui-delay').innerText = "—";
+        document.getElementById('ui-title').innerText = "—";
+        document.getElementById('terminal-log').innerText = "Monitor reset request received. Re-initialized engine pipeline matrix.";
+    }
+</script>
 </body>
 </html>
