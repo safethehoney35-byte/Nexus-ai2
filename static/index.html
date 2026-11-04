@@ -1,49 +1,148 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#0b1220">
-<title>NEXUS AI · Browser Monitor</title>
-<style>
-:root{color-scheme:dark;--bg:#080e19;--panel:#101a2b;--panel2:#0d1625;--line:#223149;--muted:#91a1b8;--text:#edf3fc;--blue:#5b8cff;--green:#25c58a;--red:#ff647c;--amber:#f4b64c}
-*{box-sizing:border-box}body{margin:0;background:radial-gradient(900px 500px at 80% -10%,#172b4b 0%,transparent 60%),var(--bg);color:var(--text);font:14px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif}
-.wrap{max-width:1180px;margin:auto;padding:28px 20px 48px}.top{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:24px}.brand{display:flex;align-items:center;gap:12px}.logo{width:42px;height:42px;border-radius:13px;background:linear-gradient(135deg,#6da0ff,#635bdb);display:grid;place-items:center;font-weight:900;font-size:18px;box-shadow:0 8px 30px #4776d955}.brand h1{font-size:18px;letter-spacing:.12em;margin:0}.brand small{display:block;color:var(--muted);letter-spacing:.04em}.pill{border:1px solid var(--line);border-radius:99px;padding:7px 12px;color:var(--muted);font-size:12px;display:flex;gap:8px;align-items:center}.dot{width:8px;height:8px;border-radius:50%;background:#738197}.dot.RUNNING{background:var(--green);box-shadow:0 0 12px #25c58a99}.dot.ERROR{background:var(--red)}.dot.STARTING,.dot.STOPPING{background:var(--amber)}
-.hero{border:1px solid var(--line);background:linear-gradient(145deg,#14233a,#0e1727 70%);border-radius:18px;padding:22px;margin-bottom:18px}.hero h2{margin:0 0 5px;font-size:19px}.sub{color:var(--muted);margin:0 0 18px}.row{display:flex;gap:10px}.url{flex:1;min-width:0;background:#08111f;border:1px solid #2b3b55;color:var(--text);border-radius:10px;padding:13px 14px;outline:none}.url:focus{border-color:var(--blue);box-shadow:0 0 0 3px #5b8cff20}button{border:0;border-radius:10px;padding:11px 18px;font-weight:700;cursor:pointer;transition:background .15s,transform .15s,opacity .15s}button:active{transform:translateY(1px)}button:disabled{opacity:.45;cursor:not-allowed}.primary{background:var(--blue);color:white;min-width:108px}.stop{background:#3a2330;color:#ff9eae;min-width:108px}.stop.active{background:var(--red);color:#210810}.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px}.metric,.card{border:1px solid var(--line);background:linear-gradient(160deg,#111d30,#0d1625);border-radius:15px}.metric{padding:15px 17px}.metric span{display:block;color:var(--muted);font-size:12px}.metric strong{display:block;font-size:18px;margin-top:5px}.grid{display:grid;grid-template-columns:1.25fr .75fr;gap:14px}.card{padding:17px;min-width:0}.cardhead{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}.card h3{margin:0;font-size:14px;letter-spacing:.02em}.count{font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:99px;padding:3px 8px}.list{display:grid;gap:9px}.element{background:#0a1423;border:1px solid #20304a;border-radius:11px;padding:12px;display:flex;justify-content:space-between;gap:12px;align-items:center}.element b{display:block;font-size:13px;overflow-wrap:anywhere}.element small{color:var(--muted);font-size:11px;overflow-wrap:anywhere}.actions{display:flex;gap:7px;flex-shrink:0}.yes{background:#164b3b;color:#8cf0c8;padding:8px 12px}.no{background:#38212b;color:#ff9eae;padding:8px 12px}.blocked{color:var(--amber);font-size:11px;white-space:nowrap}.empty{color:var(--muted);padding:20px;text-align:center;border:1px dashed var(--line);border-radius:10px}.logs{height:220px;overflow:auto;display:grid;align-content:start;gap:7px}.log{font:11px/1.5 ui-monospace,SFMono-Regular,monospace;color:#c4d0e1;overflow-wrap:anywhere}.log time{color:#7588a3;margin-right:8px}.log.ERROR{color:#ff9aa9}.detections{display:grid;gap:7px}.detection{display:flex;justify-content:space-between;gap:12px;padding:9px 10px;border-radius:9px;background:#0a1423;border:1px solid #20304a}.detection code{color:#b7c8e4;font-size:11px;overflow-wrap:anywhere}.tag{font-size:10px;color:var(--amber);white-space:nowrap}.notice{margin-top:15px;color:#9fb0c8;font-size:11px;line-height:1.6}.modal{position:fixed;inset:0;background:#030712d9;display:none;place-items:center;padding:20px;z-index:10}.modal.show{display:grid}.dialog{width:min(430px,100%);background:#111d30;border:1px solid #344967;border-radius:17px;padding:22px;box-shadow:0 25px 90px #0009}.dialog h3{margin:0 0 8px}.dialog p{color:var(--muted);overflow-wrap:anywhere}.dialog .row{margin-top:18px}.dialog input{width:100%;background:#08111f;border:1px solid var(--line);padding:12px;border-radius:9px;color:white}.right{margin-left:auto}.errorbox{color:#ff9aa9;font-size:12px;margin-top:9px;min-height:18px}
-@media(max-width:760px){.wrap{padding:18px 13px}.top{align-items:flex-start}.row{flex-wrap:wrap}.url{flex-basis:100%}.metrics{grid-template-columns:1fr 1fr}.grid{grid-template-columns:1fr}.element{align-items:flex-start;flex-direction:column}.actions{width:100%}.actions button{flex:1}.pill{font-size:10px}}
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NEXUS AI · Browser Monitor</title>
+    <style>
+        body { font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif; background: #090d16; color: #e2e8f0; margin: 0; padding: 30px; }
+        .dashboard { max-width: 1000px; margin: 0 auto; background: #111827; border: 1px solid #1f2937; border-radius: 12px; padding: 30px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.7); }
+        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1f2937; padding-bottom: 20px; margin-bottom: 25px; }
+        h1 { margin: 0; font-size: 24px; color: #fff; font-weight: 600; letter-spacing: -0.5px; }
+        h1 span { color: #3b82f6; }
+        .badge { background: #ef4444; color: white; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 25px; }
+        .panel { background: #0b0f19; border: 1px solid #1f2937; border-radius: 8px; padding: 20px; }
+        h2 { font-size: 16px; margin-top: 0; color: #94a3b8; font-weight: 500; }
+        input[type="text"], input[type="password"] { width: 100%; padding: 12px; background: #090d16; border: 1px solid #334155; border-radius: 6px; color: white; box-sizing: border-box; font-size: 14px; margin-bottom: 15px; }
+        .btn-group { display: flex; gap: 10px; margin-bottom: 20px; }
+        button { flex: 1; padding: 12px; font-weight: 600; border-radius: 6px; cursor: pointer; border: none; font-size: 14px; transition: background 0.2s; }
+        .btn-start { background: #2563eb; color: white; }
+        .btn-start:hover { background: #1d4ed8; }
+        .btn-stop { background: #374151; color: #94a3b8; }
+        .state-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #1e293b; font-size: 14px; }
+        .state-val { font-family: monospace; color: #38bdf8; font-weight: 600; }
+        .state-val.success { color: #34d399; }
+        .log-box { background: #090d16; border: 1px solid #1e293b; border-radius: 6px; padding: 12px; font-family: monospace; font-size: 12px; color: #a7f3d0; height: 150px; overflow-y: auto; white-space: pre-wrap; }
+        .diagnostic-box { background: #090d16; border: 1px solid #1e293b; border-radius: 6px; padding: 12px; font-family: monospace; font-size: 12px; color: #94a3b8; height: 100px; overflow-y: auto; }
+    </style>
 </head>
 <body>
-<div class="wrap">
-<header class="top"><div class="brand"><div class="logo">N</div><div><h1>NEXUS AI</h1><small>Browser Monitor · v1.0</small></div></div><div class="pill"><i class="dot" id="statusDot"></i><span id="statusText">STOPPED</span></div></header>
-<section class="hero"><h2>Browser control</h2><p class="sub">Connect to a public website, inspect its visible controls, and approve ordinary actions one at a time.</p><div class="row"><input id="url" class="url" type="url" placeholder="https://example.com" autocomplete="url"><button class="primary" id="startBtn">Start</button><button class="stop" id="stopBtn" disabled>Stop</button></div><div class="errorbox" id="topError"></div></section>
-<section class="metrics"><div class="metric"><span>Browser state</span><strong id="stateMetric">Stopped</strong></div><div class="metric"><span>Detected controls</span><strong id="elementMetric">0</strong></div><div class="metric"><span>Current page</span><strong id="titleMetric">—</strong></div></section>
-<div class="grid">
-<section class="card"><div class="cardhead"><h3>Detected elements</h3><span class="count" id="elementCount">0 found</span></div><div class="list" id="elements"><div class="empty">Start a browser session to detect page elements.</div></div><p class="notice">YES opens a final approval prompt before clicking. NO declines the action. Only ordinary buttons and links are eligible; form-submit, payment, account, ad and reward-related controls are blocked.</p></section>
-<div style="display:grid;gap:14px;align-content:start">
-<section class="card"><div class="cardhead"><h3>Selector diagnostics</h3><span class="count">Read-only</span></div><div class="detections" id="detections"><div class="empty">No page scanned yet.</div></div><p class="notice">Ad/reward-related selectors are detection-only. NEXUS will not click them or automate ad views/reward completion.</p></section>
-<section class="card"><div class="cardhead"><h3>Activity log</h3><span class="count">Live</span></div><div class="logs" id="activity"></div></section>
-<section class="card"><div class="cardhead"><h3>Error log</h3><span class="count">Diagnostics</span></div><div class="logs" id="errors"><div class="empty">No errors recorded.</div></div></section>
-</div></div>
+
+<div class="dashboard">
+    <div class="header">
+        <h1>NEXUS <span>AI</span> · Browser Monitor</h1>
+        <div class="badge" id="status-badge">STOPPED</div>
+    </div>
+
+    <div class="grid">
+        <!-- Left Panel: Browser Control -->
+        <div class="panel">
+            <h2>Browser Control</h2>
+            <p style="font-size: 13px; color: #64748b; margin-top: -5px; margin-bottom: 15px;">Connect to a public website to run an isolated, randomized stealth profile engine sequence.</p>
+            
+            <label style="font-size: 12px; color: #94a3b8; display:block; margin-bottom:5px;">Target Destination URL</label>
+            <input type="text" id="targetUrl" placeholder="https://example.com" value="https://sannysoft.com">
+            
+            <div class="btn-group">
+                <button class="btn-start" onclick="dispatchStealthEngine()">Start</button>
+                <button class="btn-stop" onclick="resetMonitor()">Stop</button>
+            </div>
+
+            <div class="state-row"><span>Browser State</span><span class="state-val" id="browser-state" style="color:#ef4444;">Stopped</span></div>
+            <div class="state-row"><span>Active OS Match</span><span class="state-val" id="meta-os">—</span></div>
+            <div class="state-row"><span>Spoofed GPU Core</span><span class="state-val" id="meta-gpu">—</span></div>
+            <div class="state-row"><span>Canvas Resolution</span><span class="state-val" id="meta-res">—</span></div>
+            <div class="state-row"><span>Cognitive Delay Spent</span><span class="state-val" id="meta-delay">—</span></div>
+            <div class="state-row"><span>Current Page Title</span><span class="state-val success" id="current-page">—</span></div>
+        </div>
+
+        <!-- Right Panel: Logs & Diagnostics -->
+        <div class="panel" style="display: flex; flex-direction: column; gap: 15px;">
+            <div>
+                <h2>Activity Log <span style="font-size:10px; color:#34d399; background:rgba(52,211,153,0.1); padding:2px 6px; border-radius:4px; margin-left:5px;">Live</span></h2>
+                <div class="log-box" id="activity-log">System clear. Awaiting pipeline initialization parameters...</div>
+            </div>
+
+            <div>
+                <h2>Secure System Access</h2>
+                <input type="password" id="accessKey" placeholder="Enter NEXUS_ACCESS_KEY if required" value="">
+            </div>
+            
+            <div>
+                <h2>Error & Diagnostic Log</h2>
+                <div class="diagnostic-box" id="error-log">No diagnostic warnings flags caught. Integrity status: Green.</div>
+            </div>
+        </div>
+    </div>
 </div>
-<div class="modal" id="keyModal"><div class="dialog"><h3>Secure access</h3><p>Enter the NEXUS_ACCESS_KEY configured in your Render environment. It stays in this browser tab session.</p><input id="keyInput" type="password" placeholder="Access key" autocomplete="off"><div class="errorbox" id="keyError"></div><div class="row"><button class="primary right" id="saveKey">Connect</button></div></div></div>
-<div class="modal" id="approvalModal"><div class="dialog"><h3>Approve this action?</h3><p id="approvalText"></p><p>This click will be sent to the browser only after you choose YES.</p><div class="row"><button class="no" id="decline">No</button><button class="yes right" id="confirm">Yes, click</button></div><div class="errorbox" id="approvalError"></div></div></div>
+
 <script>
-const $=id=>document.getElementById(id);let key=sessionStorage.getItem('nexus_key')||'',pending=null,lastData=null;
-function api(path,opts={}){return fetch(path,{...opts,headers:{'Content-Type':'application/json','X-Nexus-Key':key,...(opts.headers||{})}}).then(async r=>{let d=await r.json().catch(()=>({detail:'Invalid server response'}));if(!r.ok)throw Error(d.detail||`HTTP ${r.status}`);return d})}
-function setStatus(s,msg=''){ $('statusText').textContent=s;$('statusDot').className='dot '+s;$('stateMetric').textContent=s[0]+s.slice(1).toLowerCase();$('topError').textContent=msg; $('startBtn').disabled=['STARTING','RUNNING','STOPPING'].includes(s);$('stopBtn').disabled=['STOPPED','STOPPING'].includes(s);$('stopBtn').classList.toggle('active',s==='RUNNING');}
-function renderList(items){$('elementCount').textContent=items.length+' found';$('elementMetric').textContent=items.length;if(!items.length){$('elements').innerHTML='<div class="empty">No supported controls detected on this page.</div>';return}
-$('elements').innerHTML=items.map(e=>`<div class="element"><div><b>${esc(e.text)}</b><small>${esc(e.tag.toUpperCase())} · ${esc(e.id)}</small></div><div class="actions">${e.clickable?`<button class="yes" data-yes="${esc(e.id)}">Yes / Review</button>`:`<span class="blocked">${e.sensitive?'Blocked by safety filter':e.visible?'Read-only':'Hidden'}</span>`}</div></div>`).join('');
-document.querySelectorAll('[data-yes]').forEach(b=>b.onclick=()=>openApproval(b.dataset.yes));}
-function renderDetections(items){$('detections').innerHTML=items.length?items.map(x=>`<div class="detection"><div><b>${esc(x.name)}</b><br><code>${esc(x.selector)}</code><br><small>${esc(x.sample||'No matching element')}</small></div><span class="tag">${x.count} · READ ONLY</span></div>`).join(''):'<div class="empty">No page scanned yet.</div>'}
-function renderLogs(id,items,empty){$(id).innerHTML=items.length?items.slice().reverse().map(x=>`<div class="log ${x.level==='ERROR'?'ERROR':''}"><time>${esc(x.time)}</time>${esc(x.message)}</div>`).join(''):`<div class="empty">${empty}</div>`}
-function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-async function refresh(){try{const d=await api('/api/data');lastData=d;setStatus(d.status,d.status==='ERROR'?d.message:'');$('titleMetric').textContent=d.title||'—';renderList(d.elements||[]);renderDetections(d.detections||[]);renderLogs('activity',d.activity||[],'No activity yet.');renderLogs('errors',d.errors||[],'No errors recorded.')}catch(e){if(e.message.includes('Access key')){$('keyModal').classList.add('show')}else if(e.message.includes('not configured')){$('topError').textContent=e.message;setStatus('ERROR',e.message)}else{$('topError').textContent=e.message}}}
-$('saveKey').onclick=async()=>{key=$('keyInput').value.trim();if(!key){$('keyError').textContent='Enter your access key.';return}sessionStorage.setItem('nexus_key',key);try{await api('/api/data');$('keyModal').classList.remove('show');$('keyError').textContent='';refresh()}catch(e){$('keyError').textContent=e.message;sessionStorage.removeItem('nexus_key');key=''}};
-$('startBtn').onclick=async()=>{const url=$('url').value.trim();if(!url){$('topError').textContent='Enter a website URL first.';return}setStatus('STARTING');try{await api('/api/start',{method:'POST',body:JSON.stringify({url})});refresh()}catch(e){setStatus('ERROR',e.message)}};
-$('stopBtn').onclick=async()=>{setStatus('STOPPING');try{await api('/api/stop',{method:'POST'});refresh()}catch(e){setStatus('ERROR',e.message)}};
-function openApproval(id){const e=(lastData?.elements||[]).find(x=>x.id===id);if(!e)return;pending=id;$('approvalText').textContent=`${e.text} (${e.tag})`;$('approvalError').textContent='';$('approvalModal').classList.add('show')}
-$('decline').onclick=async()=>{if(pending)try{await api('/api/reject',{method:'POST',body:JSON.stringify({element_id:pending})})}catch(e){}pending=null;$('approvalModal').classList.remove('show');refresh()};
-$('confirm').onclick=async()=>{if(!pending)return;$('confirm').disabled=true;try{await api('/api/approve',{method:'POST',body:JSON.stringify({element_id:pending})});pending=null;$('approvalModal').classList.remove('show');refresh()}catch(e){$('approvalError').textContent=e.message}finally{$('confirm').disabled=false}};
-if(key){refresh()}else{$('keyModal').classList.add('show')}setInterval(()=>{if(key)$('keyModal').classList.contains('show')||refresh()},2500);
-</script>
-</body></html>
+    async function dispatchStealthEngine() {
+        const urlInput = document.getElementById('targetUrl').value;
+        const statusBadge = document.getElementById('status-badge');
+        const bState = document.getElementById('browser-state');
+        const log = document.getElementById('activity-log');
+        const errLog = document.getElementById('error-log');
+        
+        if(!urlInput) {
+            alert("Please input a destination site URL path first.");
+            return;
+        }
+
+        // Updating UI to working parameters
+        statusBadge.innerText = "RUNNING";
+        statusBadge.style.background = "#2563eb";
+        bState.innerText = "Initializing Armour Matrix...";
+        bState.style.color = "#3b82f6";
+        log.innerText = `[NEXUS Initialized] -> Pulling dynamic profiles from core framework layers...\n[Pipeline] Dispatching isolated background Chromium engine sequence to target: ${urlInput}\n`;
+
+        try {
+            const response = await fetch('/api/run', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url: urlInput })
+            });
+            const data = await response.json();
+
+            if(data.status === "success") {
+                statusBadge.innerText = "SUCCESS";
+                statusBadge.style.background = "#10b981";
+                bState.innerText = "Completed Successfully";
+                bState.style.color = "#10b981";
+                
+                // Updating metadata allocation counters
+                document.getElementById('meta-os').innerText = data.profile_used.os.toUpperCase();
+                document.getElementById('meta-gpu').innerText = data.profile_used.gpu;
+                document.getElementById('meta-res').innerText = data.profile_used.resolution;
+                document.getElementById('meta-delay').innerText = data.profile_used.delay_spent;
+                document.getElementById('current-page').innerText = data.title || "No Title Tag Found";
+
+                log.innerText += `[Success] Handshake matched. HTTP Status Frame Code: ${data.http_code}\n[Armour Details] OS Matrix: ${data.profile_used.os} | Hardware GPU Mask applied: ${data.profile_used.gpu}\n[Timing Tunnel] Simulated cognitive pause duration spent: ${data.profile_used.delay_spent}\n[Pipeline System] Clean tear-down completed successfully. Profile destroyed to bypass persistent tracing tracking trackers tracking trackers.`;
+            } else {
+                throw new Error(data.message || "Failed execution loop runtime parameter error.");
+            }
+        } catch (err) {
+            statusBadge.innerText = "FAILED";
+            statusBadge.style.background = "#ef4444";
+            bState.innerText = "Error Flags Raised";
+            bState.style.color = "#ef4444";
+            log.innerText += `[-] Runtime automation instance execution cracked.\n`;
+            errLog.innerText = `[Alert Warning Exception] ${err.message}`;
+        }
+    }
+
+    function resetMonitor() {
+        document.getElementById('status-badge').innerText = "STOPPED";
+        document.getElementById('status-badge').style.background = "#ef4444";
+        document.getElementById('browser-state').innerText = "Stopped";
+        document.getElementById('browser-state').style.color = "#ef4444";
+        document.getElementById('meta-os').innerText = "—";
+        document.getElementById('meta-gpu').innerText = "—";
+        document.getElementById('meta-res').innerText = "—";
+        document.getElementById('meta-delay').innerText = "—";
+        document.getElementById('current-page').innerText = "—";
+        document.getElementById('activity-log').innerText = "System reset triggered. Monitor returned to fresh pipeline state.";
+    </script>
+</body>
+</html>
