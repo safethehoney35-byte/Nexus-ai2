@@ -956,9 +956,475 @@ async def execute_approved_action(token):
             "success": True,
             "message": "Approved action completed.",
         }
+
     except Exception as error:
 
         raise HTTPException(
-            status_code=500,
-            detail=f"Action failed: {str(error)}",
+            status_code=400,
+            detail=str(error),
         )
+
+
+# ============================================================
+# HEALTH CHECK
+# ============================================================
+
+@app.get("/health")
+async def health():
+
+    return {
+
+        "status": "healthy",
+
+        "app": APP_NAME,
+
+        "version": APP_VERSION,
+
+        "browser_running": browser_running,
+
+    }
+
+
+# ============================================================
+# HOME PAGE
+# ============================================================
+
+@app.get("/", response_class=HTMLResponse)
+async def home():
+
+    return """
+    <html>
+        <head>
+            <title>Nexus AI</title>
+        </head>
+
+        <body>
+            <h1>Nexus AI</h1>
+
+            <p>Browser diagnostics service is running.</p>
+
+            <a href="/automation/nexus-bypass">
+                Open Nexus Dashboard
+            </a>
+        </body>
+    </html>
+    """
+
+
+# ============================================================
+# DASHBOARD
+# ============================================================
+
+@app.get("/automation/nexus-bypass", response_class=HTMLResponse)
+async def dashboard():
+
+    try:
+
+        with open(
+            "static/index.html",
+            "r",
+            encoding="utf-8",
+        ) as file:
+
+            return file.read()
+
+    except FileNotFoundError:
+
+        raise HTTPException(
+            status_code=404,
+            detail="Dashboard file not found.",
+        )
+
+
+# ============================================================
+# API STATUS
+# ============================================================
+
+@app.get("/api/status")
+async def api_status():
+
+    return {
+
+        "app": APP_NAME,
+
+        "version": APP_VERSION,
+
+        "browser_running": browser_running,
+
+        "active_url": active_url,
+
+        "connected_clients": len(connected_clients),
+
+        "pending_approvals": len(pending_approvals),
+
+    }
+
+
+# ============================================================
+# START BROWSER
+# ============================================================
+
+@app.post("/api/start")
+async def api_start(request: StartRequest = StartRequest()):
+
+    global active_url
+
+    await start_browser()
+
+    if request.url:
+
+        await validate_public_url(request.url)
+
+        await page.goto(
+            request.url,
+            wait_until="domcontentloaded",
+            timeout=30000,
+        )
+
+        active_url = page.url
+
+        await install_dom_observer()
+
+        await broadcast(
+            "navigation_completed",
+            {
+                "url": active_url,
+                "title": await page.title(),
+            },
+        )
+
+    return {
+
+        "success": True,
+
+        "browser_running": True,
+
+        "url": active_url,
+
+    }
+
+
+# ============================================================
+# STOP BROWSER
+# ============================================================
+
+@app.post("/api/stop")
+async def api_stop():
+
+    await stop_browser()
+
+    return {
+        "success": True,
+        "browser_running": False,
+    }
+
+
+# ============================================================
+# URL NAVIGATION
+# ============================================================
+
+@app.post("/api/navigate")
+async def api_navigate(request: NavigateRequest):
+
+    global active_url
+
+    if not browser_running or not page:
+
+        raise HTTPException(
+            status_code=400,
+            detail="Start the browser first.",
+        )
+
+    await validate_public_url(request.url)
+
+    try:
+
+        await page.goto(
+            request.url,
+            wait_until="domcontentloaded",
+            timeout=30000,
+        )
+
+        active_url = page.url
+
+        await install_dom_observer()
+
+        await broadcast(
+            "navigation_completed",
+            {
+                "url": active_url,
+                "title": await page.title(),
+            },
+        )
+
+        return {
+
+            "success": True,
+
+            "url": active_url,
+
+            "title": await page.title(),
+
+        }
+
+    except Exception as error:
+
+        raise HTTPException(
+            status_code=400,
+            detail=str(error),
+        )
+
+
+# ============================================================
+# SELECTOR LIBRARY
+# ============================================================
+
+@app.get("/api/selectors")
+async def api_selectors():
+
+    return {
+
+        "count": len(SELECTOR_LIBRARY),
+
+        "selectors": SELECTOR_LIBRARY,
+
+    }
+
+
+# ============================================================
+# SELECTOR DIAGNOSTICS
+# ============================================================
+
+@app.get("/api/diagnostics/selectors")
+async def api_selector_diagnostics():
+
+    results = await run_selector_diagnostics()
+
+    return {
+
+        "success": True,
+
+        "total": len(results),
+
+        "results": results,
+
+    }
+
+
+# ============================================================
+# ELEMENT INSPECTOR
+# ============================================================
+
+@app.post("/api/inspect")
+async def api_inspect(request: InspectRequest):
+
+    result = await inspect_element(
+        request.selector
+    )
+
+    return {
+
+        "success": True,
+
+        "element": result,
+
+    }
+
+
+# ============================================================
+# APPROVAL PREVIEW
+# ============================================================
+
+@app.post("/api/action/prepare")
+async def api_action_prepare(request: PrepareActionRequest):
+
+    return await prepare_safe_action(
+        request.selector
+    )
+
+
+# ============================================================
+# APPROVED ACTION
+# ============================================================
+
+@app.post("/api/action/execute")
+async def api_action_execute(request: ExecuteActionRequest):
+
+    return await execute_approved_action(
+        request.approval_token
+    )
+
+
+# ============================================================
+# LIVE DOM SCAN
+# ============================================================
+
+@app.get("/api/dom/scan")
+async def api_dom_scan():
+
+    if not page:
+
+        raise HTTPException(
+            status_code=400,
+            detail="Browser is not running.",
+        )
+
+    script = """
+
+    () => {
+
+        const elements = Array.from(
+            document.querySelectorAll(
+                "button, [role='button'], input[type='button']"
+            )
+        );
+
+        return elements.map((element, index) => {
+
+            const rect = element.getBoundingClientRect();
+
+            const style = getComputedStyle(element);
+
+            const visible =
+                style.display !== "none" &&
+                style.visibility !== "hidden" &&
+                rect.width > 0 &&
+                rect.height > 0;
+
+            const disabled =
+                element.disabled === true ||
+                element.getAttribute("aria-disabled") === "true";
+
+            let unobstructed = false;
+
+            if (visible) {
+
+                const top = document.elementFromPoint(
+                    rect.left + rect.width / 2,
+                    rect.top + rect.height / 2
+                );
+
+                unobstructed =
+                    top === element ||
+                    element.contains(top);
+
+            }
+
+            const clickable =
+                visible &&
+                !disabled &&
+                unobstructed;
+
+            return {
+
+                index,
+
+                tag: element.tagName.toLowerCase(),
+
+                text: (
+                    element.innerText ||
+                    element.value ||
+                    ""
+                ).trim().slice(0, 200),
+
+                id: element.id,
+
+                className: element.className,
+
+                visible,
+
+                disabled,
+
+                clickable,
+
+                status: clickable
+                    ? "NOW CLICKABLE"
+                    : "NOT CLICKABLE"
+
+            };
+
+        });
+
+    }
+
+    """
+
+    elements = await page.evaluate(script)
+
+    return {
+
+        "success": True,
+
+        "count": len(elements),
+
+        "elements": elements,
+
+    }
+
+
+# ============================================================
+# WEBSOCKET
+# ============================================================
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+
+    await websocket.accept()
+
+    connected_clients.add(websocket)
+
+    try:
+
+        await websocket.send_json({
+
+            "type": "connected",
+
+            "data": {
+
+                "message": "Connected to Nexus AI",
+
+                "version": APP_VERSION,
+
+                "browser_running": browser_running,
+
+            },
+
+        })
+
+        while True:
+
+            message = await websocket.receive_text()
+
+            if message == "ping":
+
+                await websocket.send_json({
+
+                    "type": "pong",
+
+                    "timestamp": time.time(),
+
+                })
+
+            elif message == "scan":
+
+                if page:
+
+                    await websocket.send_json({
+
+                        "type": "scan_result",
+
+                        "data": await run_selector_diagnostics(),
+
+                    })
+
+    except WebSocketDisconnect:
+
+        pass
+
+    except Exception:
+
+        pass
+
+    finally:
+
+        connected_clients.discard(websocket)
