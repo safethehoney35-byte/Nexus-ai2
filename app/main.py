@@ -1,1495 +1,420 @@
+from __future__ import annotations
+
 import asyncio
 import ipaddress
-import json
-import secrets
+import logging
+import os
+import re
 import socket
 import time
-
+import uuid
 from contextlib import asynccontextmanager
-from typing import Optional
+from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, HttpUrl
-from playwright.async_api import (
-    async_playwright,
-    Browser,
-    BrowserContext,
-    Page,
+from pydantic import BaseModel, Field, HttpUrl
+from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
+
+APP_VERSION = "1.0.0"
+ACCESS_KEY = os.getenv("NEXUS_ACCESS_KEY", "").strip()
+SCAN_INTERVAL = 2.0
+MAX_ELEMENTS = 80
+LOG_LIMIT = 120
+HOST_VALIDATION_CACHE: dict[str, tuple[float, bool]] = {}
+
+DETECTION_ONLY = {
+    "watchAds": '[data-testid="lv-membership-plan-option-wrapper-btn"]',
+    "continueButton": '[data-testid="action-wall-continue-action-btn"]',
+    "adCounter": ".carousel-items-counter p",
+    "adLabel": ".lv-card__ad-indicator p",
+    "skipAdContainer": '[data-testid="lv-lib-carousel-skip-btn"]',
+    "successHeading": '[data-testid="success-title"]',
+    "contentReady": ".success-wrapper h2",
+    "openHereButton": ".success-wrapper button",
+}
+BLOCKED_TERMS = re.compile(
+    r"\b(ad|ads|advert|advertisement|reward|claim|skip ad|watch ads|"
+    r"membership|payment|pay now|purchase|checkout|subscribe|"
+    r"delete|remove account|transfer|withdraw|payout)\b", re.I
 )
 
-
-# ============================================================
-# NEXUS AI CONFIGURATION
-# ============================================================
-
-APP_NAME = "Nexus AI"
-APP_VERSION = "0.7.0"
-
-MAX_APPROVAL_AGE = 30
-
-browser_engine = None
-browser: Optional[Browser] = None
-browser_context: Optional[BrowserContext] = None
-page: Optional[Page] = None
-
-active_url = None
-browser_running = False
-
-connected_clients = set()
-pending_approvals = {}
+state: dict[str, Any] = {
+    "status": "STOPPED", "url": "", "title": "", "message": "Ready",
+    "started_at": None, "last_scan": None, "elements": [],
+    "detections": [], "activity": [], "errors": [], "session_id": None,
+}
+playwright = None
+browser = None
+context = None
+page = None
+monitor_task: asyncio.Task | None = None
+start_task: asyncio.Task | None = None
+operation_lock = asyncio.Lock()
+log = logging.getLogger("nexus")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 
-# ============================================================
-# PREDEFINED SELECTOR LIBRARY
-# ============================================================
-
-SELECTOR_LIBRARY = [
-    {
-        "name": "Watch Ads option",
-        "selector": '[data-testid="lv-membership-plan-option-wrapper-btn"]',
-        "category": "ad_reward_detection",
-        "detection_only": True,
-    },
-    {
-        "name": "Continue button",
-        "selector": '[data-testid="action-wall-continue-action-btn"]',
-        "category": "ad_reward_detection",
-        "detection_only": True,
-    },
-    {
-        "name": "Ad counter",
-        "selector": ".carousel-items-counter p",
-        "category": "ad_reward_detection",
-        "detection_only": True,
-    },
-    {
-        "name": "Ad label",
-        "selector": ".lv-card__ad-indicator p",
-        "category": "ad_reward_detection",
-        "detection_only": True,
-    },
-    {
-        "name": "Skip Ad control",
-        "selector": '[data-testid="lv-lib-carousel-skip-btn"]',
-        "category": "ad_reward_detection",
-        "detection_only": True,
-    },
-    {
-        "name": "Success heading",
-        "selector": '[data-testid="success-title"]',
-        "category": "ad_reward_detection",
-        "detection_only": True,
-    },
-    {
-        "name": "Content-ready heading",
-        "selector": ".success-wrapper h2",
-        "category": "ad_reward_detection",
-        "detection_only": True,
-    },
-    {
-        "name": "Open here button",
-        "selector": ".success-wrapper button",
-        "category": "ad_reward_detection",
-        "detection_only": True,
-    },
-]
+def add_log(message: str, level: str = "INFO") -> None:
+    item = {"time": time.strftime("%H:%M:%S"), "level": level, "message": str(message)[:500]}
+    state["activity"].append(item)
+    state["activity"] = state["activity"][-LOG_LIMIT:]
+    if level == "ERROR":
+        state["errors"].append(item)
+        state["errors"] = state["errors"][-LOG_LIMIT:]
+    getattr(log, "error" if level == "ERROR" else "info")(message)
 
 
-# ============================================================
-# APP LIFECYCLE
-# ============================================================
+def require_key(x_nexus_key: str | None) -> None:
+    if not ACCESS_KEY:
+        raise HTTPException(503, "NEXUS_ACCESS_KEY is not configured on the server.")
+    if not x_nexus_key or x_nexus_key != ACCESS_KEY:
+        raise HTTPException(401, "Access key missing or incorrect.")
+
+
+async def validate_public_url(value: str) -> str:
+    try:
+        parsed = urlparse(value)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            raise ValueError("Only valid http:// and https:// URLs are supported.")
+        if parsed.username or parsed.password:
+            raise ValueError("URLs containing embedded credentials are not allowed.")
+        host = parsed.hostname.rstrip(".").lower()
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        cache_key = f"{host}:{port}"
+        cached = HOST_VALIDATION_CACHE.get(cache_key)
+        if cached and time.monotonic() - cached[0] < 60:
+            if cached[1]:
+                return value
+            raise ValueError("The URL resolves to a private or non-public address.")
+        if host in {"localhost", "localhost.localdomain"} or host.endswith(".local"):
+            raise ValueError("Local/private network addresses are not allowed.")
+        try:
+            ip = ipaddress.ip_address(host)
+            addresses = [ip]
+        except ValueError:
+            infos = await asyncio.wait_for(
+                asyncio.get_running_loop().getaddrinfo(host, port, type=socket.SOCK_STREAM),
+                timeout=4.0,
+            )
+            addresses = [ipaddress.ip_address(info[4][0]) for info in infos]
+        if not addresses:
+            raise ValueError("The hostname did not resolve.")
+        is_public = all(addr.is_global for addr in addresses)
+        HOST_VALIDATION_CACHE[cache_key] = (time.monotonic(), is_public)
+        if not is_public:
+            raise ValueError("The URL resolves to a private or non-public address.")
+        return value
+    except asyncio.TimeoutError:
+        raise ValueError("DNS lookup timed out. Check the hostname and try again.")
+    except (socket.gaierror, OSError):
+        raise ValueError("The hostname could not be resolved.")
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError(f"URL validation failed: {type(exc).__name__}")
+
+
+async def route_guard(route) -> None:
+    request_url = route.request.url
+    try:
+        await validate_public_url(request_url)
+        await route.continue_()
+    except Exception:
+        add_log(f"Blocked a request to a non-public or invalid destination: {urlparse(request_url).hostname}", "WARN")
+        await route.abort()
+
+
+async def scan_page() -> None:
+    if page is None or page.is_closed():
+        return
+    try:
+        result = await page.evaluate("""(limit) => {
+          const nodes = [...document.querySelectorAll(
+            'button, a[href], input, select, textarea, [role="button"]'
+          )].slice(0, limit);
+          return nodes.map((el, index) => {
+            if (!el.dataset.nexusId) el.dataset.nexusId = 'nx-' + crypto.randomUUID();
+            const style = getComputedStyle(el);
+            const rect = el.getBoundingClientRect();
+            const visible = style.display !== 'none' && style.visibility !== 'hidden'
+              && rect.width > 0 && rect.height > 0;
+            const text = (el.innerText || el.value || el.getAttribute('aria-label')
+              || el.getAttribute('title') || '').trim().replace(/\\s+/g, ' ').slice(0, 150);
+            const tag = el.tagName.toLowerCase();
+            return {
+              id: el.dataset.nexusId, tag, text: text || '(unlabelled element)',
+              type: (el.getAttribute('type') || '').toLowerCase(),
+              href: tag === 'a' ? el.href : '',
+              visible, disabled: !!el.disabled,
+              aria: el.getAttribute('aria-label') || ''
+            };
+          });
+        }""", MAX_ELEMENTS)
+        for item in result:
+            descriptor = " ".join([item.get("text", ""), item.get("aria", ""), item.get("href", "")])
+            item["sensitive"] = bool(BLOCKED_TERMS.search(descriptor))
+            item["clickable"] = (
+                item["visible"] and not item["disabled"] and not item["sensitive"]
+                and ((item["tag"] == "button" and item["type"] == "button")
+                     or item["tag"] == "a")
+            )
+        detections = []
+        for name, selector in DETECTION_ONLY.items():
+            try:
+                count = await page.locator(selector).count()
+                sample = ""
+                if count:
+                    sample = (await page.locator(selector).first.inner_text(timeout=500)).strip()[:100]
+                detections.append({"name": name, "selector": selector, "count": count, "sample": sample,
+                                   "detection_only": True})
+            except Exception:
+                detections.append({"name": name, "selector": selector, "count": 0, "sample": "",
+                                   "detection_only": True})
+        state["elements"] = result
+        state["detections"] = detections
+        state["last_scan"] = time.time()
+        try:
+            state["title"] = await page.title()
+        except Exception:
+            pass
+    except Exception as exc:
+        add_log(f"DOM scan failed: {type(exc).__name__}: {str(exc)[:180]}", "ERROR")
+
+
+async def monitor_loop() -> None:
+    while state["status"] == "RUNNING":
+        await scan_page()
+        await asyncio.sleep(SCAN_INTERVAL)
+
+
+async def cleanup_browser() -> None:
+    global playwright, browser, context, page, monitor_task
+    current_monitor = monitor_task
+    monitor_task = None
+    if current_monitor and current_monitor is not asyncio.current_task():
+        current_monitor.cancel()
+        try:
+            await asyncio.wait_for(current_monitor, 1.5)
+        except (asyncio.CancelledError, asyncio.TimeoutError):
+            pass
+    for name, obj in (("page", page), ("context", context), ("browser", browser), ("playwright", playwright)):
+        if obj is not None:
+            try:
+                closer = getattr(obj, "close", None)
+                if closer:
+                    await asyncio.wait_for(closer(), 2.0)
+                elif name == "playwright":
+                    await asyncio.wait_for(obj.stop(), 2.0)
+            except Exception as exc:
+                add_log(f"{name} cleanup: {type(exc).__name__}", "WARN")
+    page = context = browser = playwright = None
+
+
+async def start_worker(url: str, session_id: str) -> None:
+    global playwright, browser, context, page, monitor_task
+    try:
+        await validate_public_url(url)
+        playwright = await async_playwright().start()
+        browser = await asyncio.wait_for(
+            playwright.chromium.launch(headless=True, args=[
+                "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu",
+                "--no-zygote",
+            ]),
+            timeout=18.0,
+        )
+        context = await browser.new_context(
+            viewport={"width": 1280, "height": 800},
+            java_script_enabled=True,
+            accept_downloads=False,
+        )
+        await context.route("**/*", route_guard)
+        page = await context.new_page()
+        page.set_default_timeout(2500)
+        page.set_default_navigation_timeout(20000)
+        add_log("Chromium launched. Opening the requested page.")
+        await page.goto(url, wait_until="domcontentloaded", timeout=20000)
+        if state["session_id"] != session_id or state["status"] != "STARTING":
+            return
+        state.update(status="RUNNING", message="Browser is running", started_at=time.time())
+        add_log(f"Page loaded: {url}")
+        await scan_page()
+        monitor_task = asyncio.create_task(monitor_loop())
+    except asyncio.CancelledError:
+        add_log("Start operation cancelled.")
+        raise
+    except Exception as exc:
+        state.update(status="ERROR", message=f"{type(exc).__name__}: {str(exc)[:220]}")
+        add_log(state["message"], "ERROR")
+        await cleanup_browser()
+
+
+class StartRequest(BaseModel):
+    url: str = Field(min_length=8, max_length=2048)
+
+
+class ElementRequest(BaseModel):
+    element_id: str = Field(min_length=4, max_length=100)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     yield
+    await cleanup_browser()
 
-    await stop_browser()
 
+app = FastAPI(title="NEXUS AI Browser Monitor", version=APP_VERSION, lifespan=lifespan)
+connected_clients: set[WebSocket] = set()
+STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
-app = FastAPI(
-    title=APP_NAME,
-    version=APP_VERSION,
-    lifespan=lifespan,
-)
 
-app.mount(
-    "/static",
-    StaticFiles(directory="static"),
-    name="static",
-)
+@app.get("/")
+async def home():
+    return FileResponse(STATIC_DIR / "index.html")
 
-
-# ============================================================
-# REQUEST MODELS
-# ============================================================
-
-class StartRequest(BaseModel):
-    url: Optional[str] = None
-
-
-class NavigateRequest(BaseModel):
-    url: str
-
-
-class InspectRequest(BaseModel):
-    selector: str
-
-
-class PrepareActionRequest(BaseModel):
-    selector: str
-
-
-class ExecuteActionRequest(BaseModel):
-    approval_token: str
-
-
-# ============================================================
-# WEBSOCKET MANAGER
-# ============================================================
-
-async def broadcast(event_type, data):
-
-    message = {
-        "type": event_type,
-        "timestamp": time.time(),
-        "data": data,
-    }
-
-    disconnected = set()
-
-    for client in connected_clients:
-        try:
-            await client.send_json(message)
-
-        except Exception:
-            disconnected.add(client)
-
-    for client in disconnected:
-        connected_clients.discard(client)
-
-
-# ============================================================
-# URL VALIDATION
-# ============================================================
-
-async def validate_public_url(url: str):
-
-    parsed = urlparse(url)
-
-    if parsed.scheme not in ("http", "https"):
-        raise HTTPException(
-            status_code=400,
-            detail="Only HTTP and HTTPS URLs are allowed.",
-        )
-
-    hostname = parsed.hostname
-
-    if not hostname:
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid URL hostname.",
-        )
-
-    if hostname.lower() == "localhost":
-        raise HTTPException(
-            status_code=403,
-            detail="Local addresses are blocked.",
-        )
-
-    try:
-        addresses = await asyncio.get_running_loop().getaddrinfo(
-            hostname,
-            parsed.port or (443 if parsed.scheme == "https" else 80),
-            type=socket.SOCK_STREAM,
-        )
-
-        for address in addresses:
-
-            ip = ipaddress.ip_address(address[4][0])
-
-            if not ip.is_global:
-                raise HTTPException(
-                    status_code=403,
-                    detail="Private or reserved network addresses are blocked.",
-                )
-
-    except HTTPException:
-        raise
-
-    except Exception:
-        raise HTTPException(
-            status_code=400,
-            detail="Unable to validate destination address.",
-        )
-
-    return url
-
-
-# ============================================================
-# BROWSER REQUEST FILTER
-# ============================================================
-
-async def filter_browser_request(route):
-
-    request_url = route.request.url
-
-    try:
-        await validate_public_url(request_url)
-        await route.continue_()
-
-    except Exception:
-        await route.abort()
-
-
-# ============================================================
-# BROWSER MANAGEMENT
-# ============================================================
-
-async def start_browser():
-
-    global browser_engine
-    global browser
-    global browser_context
-    global page
-    global browser_running
-
-    if browser_running and page:
-        return
-
-    try:
-
-        browser_engine = await async_playwright().start()
-
-        browser = await browser_engine.chromium.launch(
-            headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-            ],
-        )
-
-        browser_context = await browser.new_context(
-            viewport={
-                "width": 1366,
-                "height": 768,
-            },
-        )
-
-        await browser_context.route(
-            "**/*",
-            filter_browser_request,
-        )
-
-        page = await browser_context.new_page()
-
-        await page.expose_binding(
-            "nexusNotify",
-            handle_dom_notification,
-        )
-
-        browser_running = True
-
-        await broadcast(
-            "browser_started",
-            {
-                "status": "running",
-                "engine": "Chromium",
-            },
-        )
-
-        return True
-
-    except Exception as error:
-
-        browser_running = False
-
-        await broadcast(
-            "error",
-            {
-                "message": str(error),
-            },
-        )
-
-        raise
-
-
-async def stop_browser():
-
-    global browser_engine
-    global browser
-    global browser_context
-    global page
-    global browser_running
-    global active_url
-
-    browser_running = False
-    active_url = None
-
-    pending_approvals.clear()
-
-    try:
-        if browser_context:
-            await browser_context.close()
-
-    except Exception:
-        pass
-
-    try:
-        if browser:
-            await browser.close()
-
-    except Exception:
-        pass
-
-    try:
-        if browser_engine:
-            await browser_engine.stop()
-
-    except Exception:
-        pass
-
-    browser_engine = None
-    browser = None
-    browser_context = None
-    page = None
-
-    await broadcast(
-        "browser_stopped",
-        {
-            "status": "stopped",
-        },
-    )
-
-
-# ============================================================
-# LIVE DOM MONITORING
-# ============================================================
-
-async def handle_dom_notification(source, payload):
-
-    await broadcast(
-        "dom_changed",
-        payload,
-    )
-
-
-DOM_OBSERVER_SCRIPT = """
-(() => {
-
-    if (window.__nexusObserverInstalled) {
-        return;
-    }
-
-    window.__nexusObserverInstalled = true;
-
-    let timer = null;
-
-    const notify = () => {
-
-        clearTimeout(timer);
-
-        timer = setTimeout(() => {
-
-            if (typeof window.nexusNotify === "function") {
-
-                window.nexusNotify({
-                    event: "DOM_UPDATED",
-                    url: location.href,
-                    title: document.title,
-                    timestamp: Date.now()
-                });
-
-            }
-
-        }, 150);
-
-    };
-
-    const observer = new MutationObserver(() => {
-        notify();
-    });
-
-    observer.observe(document.documentElement, {
-
-        childList: true,
-        subtree: true,
-        attributes: true,
-        characterData: true
-
-    });
-
-})();
-"""
-
-
-async def install_dom_observer():
-
-    if not page:
-        return
-
-    try:
-
-        await page.evaluate(
-            DOM_OBSERVER_SCRIPT
-        )
-
-    except Exception:
-        pass
-
-
-# ============================================================
-# CLICKABILITY DETECTION
-# ============================================================
-
-CLICKABILITY_SCRIPT = """
-(selector) => {
-
-    const elements = Array.from(
-        document.querySelectorAll(selector)
-    );
-
-    return elements.map((element, index) => {
-
-        const style = getComputedStyle(element);
-
-        const rect = element.getBoundingClientRect();
-
-        const visible =
-            style.display !== "none" &&
-            style.visibility !== "hidden" &&
-            Number(style.opacity) > 0 &&
-            rect.width > 0 &&
-            rect.height > 0;
-
-        const disabled =
-            element.disabled === true ||
-            element.getAttribute("aria-disabled") === "true";
-
-        let unobstructed = false;
-
-        if (visible) {
-
-            const x = rect.left + rect.width / 2;
-            const y = rect.top + rect.height / 2;
-
-            const topElement = document.elementFromPoint(x, y);
-
-            unobstructed =
-                topElement === element ||
-                element.contains(topElement);
-
-        }
-
-        const clickable =
-            visible &&
-            !disabled &&
-            unobstructed;
-
-        return {
-
-            index,
-
-            tag: element.tagName.toLowerCase(),
-
-            text: (element.innerText || element.textContent || "")
-                .trim()
-                .slice(0, 300),
-
-            id: element.id || "",
-
-            className:
-                typeof element.className === "string"
-                    ? element.className
-                    : "",
-
-            visible,
-
-            disabled,
-
-            unobstructed,
-
-            clickable,
-
-            status: clickable
-                ? "NOW CLICKABLE"
-                : !visible
-                    ? "HIDDEN"
-                    : disabled
-                        ? "DISABLED"
-                        : "NOT CLICKABLE",
-
-            attributes: Array.from(element.attributes).reduce(
-                (result, attribute) => {
-
-                    result[attribute.name] = attribute.value;
-
-                    return result;
-
-                },
-                {}
-            )
-
-        };
-
-    });
-
-}
-"""
-
-
-async def scan_selector(selector):
-
-    if not page:
-        raise HTTPException(
-            status_code=400,
-            detail="Browser is not running.",
-        )
-
-    try:
-
-        return await page.evaluate(
-            CLICKABILITY_SCRIPT,
-            selector,
-        )
-
-    except Exception as error:
-
-        return {
-            "error": str(error),
-            "selector": selector,
-        }
-
-
-# ============================================================
-# COMPLETE SELECTOR DIAGNOSTICS
-# ============================================================
-
-async def run_selector_diagnostics():
-
-    if not page:
-        raise HTTPException(
-            status_code=400,
-            detail="Browser is not running.",
-        )
-
-    results = []
-
-    for item in SELECTOR_LIBRARY:
-
-        selector = item["selector"]
-
-        elements = await scan_selector(selector)
-
-        if isinstance(elements, dict):
-
-            results.append({
-                **item,
-                "found": False,
-                "error": elements.get("error"),
-            })
-
-            continue
-
-        results.append({
-
-            **item,
-
-            "found": len(elements) > 0,
-
-            "count": len(elements),
-
-            "elements": elements,
-
-            "status": (
-                "FOUND"
-                if elements
-                else "NOT FOUND"
-            ),
-
-        })
-
-    return results
-
-
-# ============================================================
-# TECHNICAL INSPECTOR
-# ============================================================
-
-async def inspect_element(selector):
-
-    if not page:
-        raise HTTPException(
-            status_code=400,
-            detail="Browser is not running.",
-        )
-
-    script = """
-    (selector) => {
-
-        const element = document.querySelector(selector);
-
-        if (!element) {
-            return null;
-        }
-
-        const style = getComputedStyle(element);
-
-        const rect = element.getBoundingClientRect();
-
-        return {
-
-            selector,
-
-            tag: element.tagName.toLowerCase(),
-
-            text: (
-                element.innerText ||
-                element.textContent ||
-                ""
-            ).trim().slice(0, 1000),
-
-            id: element.id,
-
-            className: element.className,
-
-            attributes: Array.from(element.attributes).reduce(
-                (result, attribute) => {
-
-                    result[attribute.name] = attribute.value;
-
-                    return result;
-
-                },
-                {}
-            ),
-
-            visible:
-                style.display !== "none" &&
-                style.visibility !== "hidden" &&
-                rect.width > 0 &&
-                rect.height > 0,
-
-            disabled:
-                element.disabled === true,
-
-            dimensions: {
-
-                width: rect.width,
-
-                height: rect.height,
-
-                x: rect.x,
-
-                y: rect.y
-
-            },
-
-            inspectedAt: Date.now()
-
-        };
-
-    }
-    """
-
-    try:
-
-        result = await page.evaluate(
-            script,
-            selector,
-        )
-
-        if result is None:
-
-            raise HTTPException(
-                status_code=404,
-                detail="Element not found.",
-            )
-
-        return result
-
-    except HTTPException:
-        raise
-
-    except Exception as error:
-
-        raise HTTPException(
-            status_code=400,
-            detail=str(error),
-        )
-
-
-# ============================================================
-# ACTION SAFETY
-# ============================================================
-
-BLOCKED_ACTION_KEYWORDS = [
-
-    "ad",
-    "skip",
-    "reward",
-    "continue",
-    "membership",
-    "success",
-    "payment",
-    "checkout",
-    "purchase",
-    "subscribe",
-    "delete",
-    "remove",
-    "transfer",
-    "password",
-    "security",
-    "login",
-    "logout",
-
-]
-
-
-def is_watch_ads_selector(selector):
-    return selector == SELECTOR_LIBRARY[0]["selector"]
-
-
-def is_detection_only_selector(selector):
-
-    # The Watch Ads choice is the only Linkvertise control that may be
-    # submitted for explicit human approval. Ad CTAs, counters, Skip Ad,
-    # reward and success controls remain detection-only.
-    if is_watch_ads_selector(selector):
-        return False
-
-    normalized = selector.lower()
-
-    for item in SELECTOR_LIBRARY:
-
-        if item["selector"] == selector:
-
-            return item["detection_only"]
-
-    detection_terms = [
-
-        "linkvertise",
-        "lv-",
-        "carousel",
-        "success-wrapper",
-        "success-title",
-
-    ]
-
-    return any(
-        term in normalized
-        for term in detection_terms
-    )
-
-
-# ============================================================
-# APPROVAL PREPARATION
-# ============================================================
-
-async def prepare_safe_action(selector):
-
-    if not page:
-        raise HTTPException(
-            status_code=400,
-            detail="Browser is not running.",
-        )
-
-    if is_detection_only_selector(selector):
-
-        raise HTTPException(
-            status_code=403,
-            detail="This selector is detection-only.",
-        )
-
-    if is_watch_ads_selector(selector):
-        # This selector can match several membership choices. Never assume
-        # the first match is correct: locate the visible button whose text
-        # identifies Watch Ads, excluding Free Access.
-        candidates = await page.locator(selector).all()
-        details = None
-        for candidate in candidates:
-            try:
-                if not await candidate.is_visible():
-                    continue
-                candidate_text = " ".join((await candidate.inner_text()).split())
-                if "watch ads" not in candidate_text.lower():
-                    continue
-                if "free access" in candidate_text.lower():
-                    continue
-                if await candidate.evaluate("el => el.tagName.toLowerCase()") != "button":
-                    continue
-                details = await candidate.evaluate("""(el, selector) => ({
-                    selector: selector,
-                    tag: el.tagName.toLowerCase(),
-                    text: (el.innerText || el.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 1000),
-                    attributes: Array.from(el.attributes).reduce((o, a) => (o[a.name] = a.value, o), {}),
-                    visible: true,
-                    disabled: !!el.disabled
-                })""", selector)
-                break
-            except Exception:
-                continue
-        if details is None:
-            raise HTTPException(status_code=404, detail="Visible Watch Ads option was not found. Free Access is not eligible.")
-    else:
-        details = await inspect_element(selector)
-
-    if details["tag"] != "button":
-
-        raise HTTPException(
-            status_code=403,
-            detail="Only ordinary HTML buttons are supported.",
-        )
-
-    if details["disabled"] or not details["visible"]:
-
-        raise HTTPException(
-            status_code=400,
-            detail="Button is not available.",
-        )
-
-    button_type = details["attributes"].get("type", "button" if is_watch_ads_selector(selector) else "submit").lower()
-
-    if button_type != "button":
-
-        raise HTTPException(
-            status_code=403,
-            detail="Submit buttons are not supported.",
-        )
-
-    text_content = details["text"].lower()
-
-    if is_watch_ads_selector(selector):
-        if "watch ads" not in text_content or "free access" in text_content:
-            raise HTTPException(status_code=403, detail="Only the Watch Ads option can be approved here.")
-    elif any(keyword in text_content for keyword in BLOCKED_ACTION_KEYWORDS):
-
-        raise HTTPException(
-            status_code=403,
-            detail="This action is restricted.",
-        )
-
-    token = secrets.token_urlsafe(32)
-
-    pending_approvals[token] = {
-
-        "selector": selector,
-
-        "watch_ads_only": is_watch_ads_selector(selector),
-
-        "tag": details["tag"],
-
-        "text": details["text"],
-
-        "created": time.time(),
-
-        "url": page.url,
-
-    }
-
-    return {
-
-        "approval_required": True,
-
-        "approval_token": token,
-
-        "action": "Select Watch Ads option" if is_watch_ads_selector(selector) else "Click ordinary button",
-
-        "target": details,
-
-        "risk": "Low-risk heuristic; inspect before approving.",
-
-        "expires_in": MAX_APPROVAL_AGE,
-
-    }
-
-
-# ============================================================
-# APPROVED ACTION EXECUTION
-# ============================================================
-
-async def execute_approved_action(token):
-
-    if token not in pending_approvals:
-
-        raise HTTPException(
-            status_code=404,
-            detail="Approval token not found or already used.",
-        )
-
-    approval = pending_approvals.pop(token)
-
-    if time.time() - approval["created"] > MAX_APPROVAL_AGE:
-
-        raise HTTPException(
-            status_code=403,
-            detail="Approval expired. Prepare the action again.",
-        )
-
-    if not page:
-
-        raise HTTPException(
-            status_code=400,
-            detail="Browser is not running.",
-        )
-
-    if page.url != approval["url"]:
-
-        raise HTTPException(
-            status_code=403,
-            detail="Page changed. Approval revoked.",
-        )
-
-    if approval.get("watch_ads_only"):
-        current = None
-        for candidate in await page.locator(approval["selector"]).all():
-            try:
-                if not await candidate.is_visible():
-                    continue
-                candidate_text = " ".join((await candidate.inner_text()).split())
-                if "watch ads" in candidate_text.lower() and "free access" not in candidate_text.lower():
-                    current = {
-                        "tag": await candidate.evaluate("el => el.tagName.toLowerCase()"),
-                        "text": candidate_text,
-                        "visible": True,
-                        "disabled": await candidate.is_disabled(),
-                    }
-                    break
-            except Exception:
-                continue
-        if current is None:
-            raise HTTPException(status_code=403, detail="Watch Ads option disappeared. Approval revoked.")
-    else:
-        current = await inspect_element(approval["selector"])
-
-    if (
-        current["tag"] != approval["tag"]
-        or current["text"] != approval["text"]
-        or not current["visible"]
-        or current["disabled"]
-    ):
-
-        raise HTTPException(
-            status_code=403,
-            detail="Target changed. Approval revoked.",
-        )
-
-    # Re-check detection-only status immediately before action.
-    if is_detection_only_selector(approval["selector"]):
-        raise HTTPException(status_code=403, detail="Detection-only selector.")
-
-    try:
-        if approval.get("watch_ads_only"):
-            target = None
-            for candidate in await page.locator(approval["selector"]).all():
-                try:
-                    if not await candidate.is_visible():
-                        continue
-                    candidate_text = " ".join((await candidate.inner_text()).split())
-                    if "watch ads" in candidate_text.lower() and "free access" not in candidate_text.lower():
-                        target = candidate
-                        break
-                except Exception:
-                    continue
-            if target is None:
-                raise RuntimeError("Watch Ads option is no longer available.")
-            await target.click(timeout=3000)
-        else:
-            await page.locator(approval["selector"]).click(timeout=3000)
-
-        await broadcast(
-            "action_completed",
-            {
-                "selector": approval["selector"],
-                "result": "completed",
-            },
-        )
-
-        await asyncio.sleep(0.2)
-
-        await broadcast(
-            "post_action_scan",
-            {
-                "url": page.url,
-                "title": await page.title(),
-            },
-        )
-
-        return {
-            "success": True,
-            "message": "Approved action completed.",
-        }
-
-    except Exception as error:
-
-        raise HTTPException(
-            status_code=400,
-            detail=str(error),
-        )
-
-
-# ============================================================
-# HEALTH CHECK
-# ============================================================
 
 @app.get("/health")
 async def health():
+    return {"status": "healthy", "app": "NEXUS AI", "version": APP_VERSION,
+            "browser_status": state["status"]}
 
-    return {
-
-        "status": "healthy",
-
-        "app": APP_NAME,
-
-        "version": APP_VERSION,
-
-        "browser_running": browser_running,
-
-    }
-
-
-# ============================================================
-# HOME PAGE
-# ============================================================
-
-@app.get("/", response_class=HTMLResponse)
-async def home():
-
-    return """
-    <html>
-        <head>
-            <title>Nexus AI</title>
-        </head>
-
-        <body>
-            <h1>Nexus AI</h1>
-
-            <p>Browser diagnostics service is running.</p>
-
-            <a href="/automation/nexus-bypass">
-                Open Nexus Dashboard
-            </a>
-        </body>
-    </html>
-    """
-
-
-# ============================================================
-# DASHBOARD
-# ============================================================
-
-@app.get("/automation/nexus-bypass", response_class=HTMLResponse)
-async def dashboard():
-
-    try:
-
-        with open(
-            "static/index.html",
-            "r",
-            encoding="utf-8",
-        ) as file:
-
-            return file.read()
-
-    except FileNotFoundError:
-
-        raise HTTPException(
-            status_code=404,
-            detail="Dashboard file not found.",
-        )
-
-
-# ============================================================
-# API STATUS
-# ============================================================
 
 @app.get("/api/status")
-async def api_status():
-
-    return {
-
-        "app": APP_NAME,
-
-        "version": APP_VERSION,
-
-        "browser_running": browser_running,
-
-        "active_url": active_url,
-
-        "connected_clients": len(connected_clients),
-
-        "pending_approvals": len(pending_approvals),
-
-    }
+async def get_status(x_nexus_key: str | None = Header(default=None)):
+    require_key(x_nexus_key)
+    return {k: v for k, v in state.items() if k not in ("activity", "errors", "elements", "detections")}
 
 
-# ============================================================
-# START BROWSER
-# ============================================================
+@app.get("/api/data")
+async def get_data(x_nexus_key: str | None = Header(default=None)):
+    require_key(x_nexus_key)
+    return {"status": state["status"], "url": state["url"], "title": state["title"],
+            "message": state["message"], "elements": state["elements"],
+            "detections": state["detections"], "activity": state["activity"][-50:],
+            "errors": state["errors"][-30:]}
+
 
 @app.post("/api/start")
-async def api_start(request: StartRequest = StartRequest()):
+async def start(req: StartRequest, x_nexus_key: str | None = Header(default=None)):
+    global start_task
+    require_key(x_nexus_key)
+    try:
+        await validate_public_url(req.url)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    async with operation_lock:
+        if state["status"] in ("STARTING", "RUNNING", "STOPPING"):
+            raise HTTPException(409, f"Browser is currently {state['status'].lower()}.")
+        state.update(status="STARTING", url=req.url, title="", message="Starting browser...",
+                     elements=[], detections=[], started_at=None, last_scan=None,
+                     session_id=str(uuid.uuid4()))
+        sid = state["session_id"]
+        add_log(f"Start requested for {req.url}")
+        start_task = asyncio.create_task(start_worker(req.url, sid))
+    return {"ok": True, "status": "STARTING", "message": "Start request accepted."}
 
-    global active_url
-
-    await start_browser()
-
-    if request.url:
-
-        await validate_public_url(request.url)
-
-        await page.goto(
-            request.url,
-            wait_until="domcontentloaded",
-            timeout=30000,
-        )
-
-        active_url = page.url
-
-        await install_dom_observer()
-
-        await broadcast(
-            "navigation_completed",
-            {
-                "url": active_url,
-                "title": await page.title(),
-            },
-        )
-
-    return {
-
-        "success": True,
-
-        "browser_running": True,
-
-        "url": active_url,
-
-    }
-
-
-# ============================================================
-# STOP BROWSER
-# ============================================================
 
 @app.post("/api/stop")
-async def api_stop():
+async def stop(x_nexus_key: str | None = Header(default=None)):
+    global start_task
+    require_key(x_nexus_key)
+    async with operation_lock:
+        if state["status"] == "STOPPED":
+            return {"ok": True, "status": "STOPPED"}
+        state.update(status="STOPPING", message="Stopping browser...")
+        add_log("Stop requested.")
+        pending_start = start_task
+        if pending_start and not pending_start.done():
+            pending_start.cancel()
+            try:
+                await asyncio.wait_for(pending_start, 2.5)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
+        await cleanup_browser()
+        start_task = None
+        state.update(status="STOPPED", message="Browser stopped.", elements=[], detections=[])
+        add_log("Browser stopped and resources released.")
+    return {"ok": True, "status": "STOPPED"}
 
-    await stop_browser()
 
-    return {
-        "success": True,
-        "browser_running": False,
-    }
-
-
-# ============================================================
-# URL NAVIGATION
-# ============================================================
-
-@app.post("/api/navigate")
-async def api_navigate(request: NavigateRequest):
-
-    global active_url
-
-    if not browser_running or not page:
-
-        raise HTTPException(
-            status_code=400,
-            detail="Start the browser first.",
-        )
-
-    await validate_public_url(request.url)
-
+@app.post("/api/approve")
+async def approve(req: ElementRequest, x_nexus_key: str | None = Header(default=None)):
+    require_key(x_nexus_key)
+    if state["status"] != "RUNNING" or page is None or page.is_closed():
+        raise HTTPException(409, "Browser is not running.")
+    element = next((x for x in state["elements"] if x["id"] == req.element_id), None)
+    if not element:
+        raise HTTPException(404, "Element is no longer in the latest scan. Scan again.")
+    if not element.get("clickable") or element.get("sensitive"):
+        raise HTTPException(403, "This element is not eligible for manual approval.")
     try:
+        locator = page.locator(f'[data-nexus-id="{req.element_id}"]')
+        if await locator.count() != 1 or not await locator.is_visible() or not await locator.is_enabled():
+            raise HTTPException(409, "Element changed or is no longer available.")
+        # Re-check the live element's label immediately before clicking.
+        live = await locator.evaluate("""el => ({
+          tag: el.tagName.toLowerCase(), type: (el.getAttribute('type') || '').toLowerCase(),
+          text: (el.innerText || el.value || el.getAttribute('aria-label') || '').slice(0,150),
+          href: el.href || ''
+        })""")
+        if BLOCKED_TERMS.search(" ".join(str(v) for v in live.values())):
+            raise HTTPException(403, "Safety filter blocked this element.")
+        if not ((live["tag"] == "button" and live["type"] == "button") or live["tag"] == "a"):
+            raise HTTPException(403, "Only ordinary buttons and links can be approved.")
+        await locator.click(timeout=2500)
+        add_log(f"Approved and clicked: {element['text'][:100]}")
+        await asyncio.sleep(0.25)
+        await scan_page()
+        return {"ok": True, "message": "Approved click completed."}
+    except HTTPException:
+        raise
+    except PlaywrightTimeoutError:
+        raise HTTPException(408, "Click timed out; the page may have changed.")
+    except Exception as exc:
+        add_log(f"Approved click failed: {type(exc).__name__}: {str(exc)[:160]}", "ERROR")
+        raise HTTPException(500, "Click failed. Check the error log.")
+
+
+@app.post("/api/reject")
+async def reject(req: ElementRequest, x_nexus_key: str | None = Header(default=None)):
+    require_key(x_nexus_key)
+    element = next((x for x in state["elements"] if x["id"] == req.element_id), None)
+    add_log(f"Click declined: {element['text'][:100] if element else req.element_id}")
+    return {"ok": True, "message": "No action taken."}
+
+
+# Compatibility routes retained for existing bookmarks and Render probes.
+@app.get("/automation/nexus-bypass")
+async def legacy_dashboard():
+    return FileResponse(STATIC_DIR / "index.html")
 
-        await page.goto(
-            request.url,
-            wait_until="domcontentloaded",
-            timeout=30000,
-        )
-
-        active_url = page.url
-
-        await install_dom_observer()
-
-        await broadcast(
-            "navigation_completed",
-            {
-                "url": active_url,
-                "title": await page.title(),
-            },
-        )
-
-        return {
-
-            "success": True,
-
-            "url": active_url,
-
-            "title": await page.title(),
-
-        }
-
-    except Exception as error:
-
-        raise HTTPException(
-            status_code=400,
-            detail=str(error),
-        )
-
-
-# ============================================================
-# SELECTOR LIBRARY
-# ============================================================
-
-@app.get("/api/selectors")
-async def api_selectors():
-
-    return {
-
-        "count": len(SELECTOR_LIBRARY),
-
-        "selectors": SELECTOR_LIBRARY,
-
-    }
-
-
-# ============================================================
-# SELECTOR DIAGNOSTICS
-# ============================================================
-
-@app.get("/api/diagnostics/selectors")
-async def api_selector_diagnostics():
-
-    results = await run_selector_diagnostics()
-
-    return {
-
-        "success": True,
-
-        "total": len(results),
-
-        "results": results,
-
-    }
-
-
-# ============================================================
-# ELEMENT INSPECTOR
-# ============================================================
-
-@app.post("/api/inspect")
-async def api_inspect(request: InspectRequest):
-
-    result = await inspect_element(
-        request.selector
-    )
-
-    return {
-
-        "success": True,
-
-        "element": result,
-
-    }
-
-
-# ============================================================
-# APPROVAL PREVIEW
-# ============================================================
-
-@app.post("/api/action/prepare")
-async def api_action_prepare(request: PrepareActionRequest):
-
-    return await prepare_safe_action(
-        request.selector
-    )
-
-
-# ============================================================
-# APPROVED ACTION
-# ============================================================
-
-@app.post("/api/action/execute")
-async def api_action_execute(request: ExecuteActionRequest):
-
-    return await execute_approved_action(
-        request.approval_token
-    )
-
-
-# ============================================================
-# LIVE DOM SCAN
-# ============================================================
-
-@app.get("/api/dom/scan")
-async def api_dom_scan():
-
-    if not page:
-
-        raise HTTPException(
-            status_code=400,
-            detail="Browser is not running.",
-        )
-
-    script = """
-
-    () => {
-
-        const elements = Array.from(
-            document.querySelectorAll(
-                "button, [role='button'], input[type='button']"
-            )
-        );
-
-        return elements.map((element, index) => {
-
-            const rect = element.getBoundingClientRect();
-
-            const style = getComputedStyle(element);
-
-            const visible =
-                style.display !== "none" &&
-                style.visibility !== "hidden" &&
-                rect.width > 0 &&
-                rect.height > 0;
-
-            const disabled =
-                element.disabled === true ||
-                element.getAttribute("aria-disabled") === "true";
-
-            let unobstructed = false;
-
-            if (visible) {
-
-                const top = document.elementFromPoint(
-                    rect.left + rect.width / 2,
-                    rect.top + rect.height / 2
-                );
-
-                unobstructed =
-                    top === element ||
-                    element.contains(top);
-
-            }
-
-            const clickable =
-                visible &&
-                !disabled &&
-                unobstructed;
-
-            return {
-
-                index,
-
-                tag: element.tagName.toLowerCase(),
-
-                text: (
-                    element.innerText ||
-                    element.value ||
-                    ""
-                ).trim().slice(0, 200),
-
-                id: element.id,
-
-                className: element.className,
-
-                visible,
-
-                disabled,
-
-                clickable,
-
-                status: clickable
-                    ? "NOW CLICKABLE"
-                    : "NOT CLICKABLE"
-
-            };
-
-        });
-
-    }
-
-    """
-
-    elements = await page.evaluate(script)
-
-    return {
-
-        "success": True,
-
-        "count": len(elements),
-
-        "elements": elements,
-
-    }
-
-
-# ============================================================
-# WEBSOCKET
-# ============================================================
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-
+    # The v1 dashboard uses authenticated polling; this endpoint remains for
+    # legacy clients and provides connection/heartbeat only.
     await websocket.accept()
-
     connected_clients.add(websocket)
-
     try:
-
         await websocket.send_json({
-
             "type": "connected",
-
-            "data": {
-
-                "message": "Connected to Nexus AI",
-
-                "version": APP_VERSION,
-
-                "browser_running": browser_running,
-
-            },
-
+            "data": {"message": "Connected to Nexus AI", "version": APP_VERSION,
+                     "browser_running": state["status"] == "RUNNING"},
         })
-
         while True:
-
             message = await websocket.receive_text()
-
             if message == "ping":
-
-                await websocket.send_json({
-
-                    "type": "pong",
-
-                    "timestamp": time.time(),
-
-                })
-
+                await websocket.send_json({"type": "pong", "timestamp": time.time()})
             elif message == "scan":
-
-                if page:
-
-                    await websocket.send_json({
-
-                        "type": "scan_result",
-
-                        "data": await run_selector_diagnostics(),
-
-                    })
-
+                await websocket.send_json({
+                    "type": "scan_result",
+                    "data": {"elements": state["elements"], "detections": state["detections"]},
+                })
     except WebSocketDisconnect:
-
         pass
-
-    except Exception:
-
-        pass
-
     finally:
-
         connected_clients.discard(websocket)
