@@ -1,7 +1,9 @@
 services:
   - type: web
-    name: nexus-ai2-service
-    runtime: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    name: nexus-ai
+    runtime: docker
+    plan: free
     healthCheckPath: /health
+    envVars:
+      - key: NEXUS_ACCESS_KEY
+        generateValue: true

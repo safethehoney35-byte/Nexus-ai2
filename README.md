@@ -1,58 +1,58 @@
-# NEXUS AI v0.7 — Linkvertise element monitor
+# NEXUS AI Browser Monitor 1.0
 
-A FastAPI + Playwright browser-monitoring dashboard based on the supplied Nexus project.
+A lightweight, single-session Playwright browser monitor with:
+- URL input and Start/Stop state machine
+- Visible control detection
+- Explicit Yes/No approval before eligible ordinary clicks
+- Activity and error logs
+- Read-only Linkvertise/ad/reward selector diagnostics
+- API access key protection
 
-## What it does
+## Safety boundaries
 
-- Accepts a Linkvertise URL and opens it in a controlled Chromium session.
-- Watches DOM changes and checks only the configured Linkvertise selectors (not arbitrary page text).
-- Identifies the **Watch Ads** membership option by its visible text, while excluding **Free Access**.
-- When Watch Ads is detected, prepares a time-limited approval request in the dashboard. Nothing is selected until the user presses **Approve**; **Reject** cancels it.
-- After the approved Watch Ads selection, monitors the ad counter (`1/3`, `2/3`, `3/3`), ad indicator, Skip Ad control and success headings.
-- Ad CTA and Skip Ad are detection-only. The user must interact with those controls manually. The app does not automate ad viewing, clicking ads, skipping ads, bypassing access requirements or manufacturing views/rewards.
-- Shows activity and error logs in the dashboard. DOM scans are debounced to avoid excessive requests.
+Ad-view, skip-ad, reward, payment, account deletion, transfer, and withdrawal-related controls are detection-only or blocked. NEXUS does not automate ad views or reward completion. Only visible ordinary `button[type=button]` elements and links can be offered for approval. Form-submit buttons are not clickable through the approval endpoint.
 
-## Selector set
+## Render deployment
 
-| Element | Selector | Behavior |
-|---|---|---|
-| Watch Ads option | `[data-testid="lv-membership-plan-option-wrapper-btn"]` | Text-filtered; approval required; Free Access excluded |
-| Continue button | `[data-testid="action-wall-continue-action-btn"]` | Detection only |
-| Ad counter | `.carousel-items-counter p` | Detection only |
-| Ad label | `.lv-card__ad-indicator p` | Detection only |
-| Skip Ad | `[data-testid="lv-lib-carousel-skip-btn"]` | Detection only; manual interaction |
-| Success heading | `[data-testid="success-title"]` | Detection only |
-| Content-ready heading | `.success-wrapper h2` | Detection only |
-| Open here button | `.success-wrapper button` | Detection only |
+1. Push the project files to your GitHub repository (replace the old app files only after making a backup).
+2. In Render, use the existing Docker service and deploy the updated commit.
+3. Set `NEXUS_ACCESS_KEY` in Render Environment to a long, unique secret. `render.yaml` can generate one for a new Blueprint service; for an existing service, verify the variable exists.
+4. Keep the service on one instance. The app intentionally runs one Chromium session to reduce memory use.
+5. Confirm `https://YOUR-SERVICE/health` returns healthy.
+6. Open the service URL. Enter the same `NEXUS_ACCESS_KEY` configured in Render.
 
-Selectors can change when Linkvertise changes its website. Use the diagnostics view to confirm current matches. A detected `3/3` counter or Skip Ad control is not proof that Linkvertise credited a view or granted access; only the platform can confirm that.
+No additional Render start command is required: Dockerfile runs `uvicorn main:app` and uses Render's `$PORT`.
 
-## Run locally
-
-Python 3.10+ recommended.
+## Local run
 
 ```bash
 python -m venv .venv
-# Windows: .venv\\Scripts\\activate
-# macOS/Linux: source .venv/bin/activate
+. .venv/bin/activate
 pip install -r requirements.txt
-python -m playwright install chromium
-uvicorn app.main:app --reload
+playwright install chromium
+export NEXUS_ACCESS_KEY='replace-with-a-long-random-secret'
+uvicorn main:app --host 127.0.0.1 --port 8000
 ```
 
-Open <http://127.0.0.1:8000/automation/nexus-bypass>.
+Open http://127.0.0.1:8000.
 
-## Deploy on Render
+## API
 
-The included `render.yaml` starts the FastAPI app. For a persistent browser environment, use a deployment that supports installing/running Playwright Chromium and its OS dependencies. Set the start command to:
+- `GET /health` — public health check
+- `GET /api/status` — authenticated status
+- `GET /api/data` — authenticated elements and logs
+- `POST /api/start` — `{"url":"https://example.com"}`
+- `POST /api/stop`
+- `POST /api/approve` — `{"element_id":"..."}`
+- `POST /api/reject` — `{"element_id":"..."}`
 
-```bash
-uvicorn app.main:app --host 0.0.0.0 --port $PORT
-```
+Authenticated requests require `X-Nexus-Key: <NEXUS_ACCESS_KEY>`.
 
-## Safety and operational notes
+## Operational notes
 
-- Approval tokens expire after 30 seconds and are bound to the current page URL and inspected target.
-- Only the specifically text-matched Watch Ads option can be approved by this Linkvertise flow.
-- Ad CTA, Skip Ad, reward, payment, account and success controls are not automated.
-- Keep the dashboard private; do not expose an unauthenticated browser-control service to the public internet.
+- The browser is launched only when Start is requested and closed on Stop or application shutdown.
+- Start returns `STARTING`; the background worker transitions to `RUNNING` or `ERROR`.
+- Stop transitions through `STOPPING` and then confirms `STOPPED`.
+- URL validation rejects localhost and non-public IP destinations. Network requests are checked as well.
+- Render Free can cold-start after inactivity and has limited memory. Browser launch time depends on Render availability and target-site response; no fixed startup time is promised.
+- This is a single-process, single-session app. Do not scale it to multiple instances without introducing shared session coordination.
