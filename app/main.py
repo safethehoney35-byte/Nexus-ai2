@@ -1,199 +1,175 @@
-from fastapi import FastAPI, Request
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlparse
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.middleware.cors import CORSMiddleware
-import os
+from pydantic import BaseModel, Field
 
-app = FastAPI(title="Nexus-AI V0.5 Updated Engine")
+BASE_DIR = Path(__file__).resolve().parent.parent
+STATIC_DIR = BASE_DIR / "static"
 
-# CORS Setup for handling external automation pipeline streams smoothly
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app = FastAPI(title="Nexus AI", version="0.6.0")
+if STATIC_DIR.is_dir():
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
-# Static files lookup mount (index.html, assets, css)
-# Falls back gracefully if directories don't exist locally
-static_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
-if os.path.exists(static_path):
-    app.mount("/static", StaticFiles(directory=static_path), name="static")
+state: dict[str, Any] = {
+    "status": "idle", "phase": "Ready", "action": "Waiting for a task.",
+    "collected": 0, "analysed": 0, "target": 12, "current_url": "",
+    "current_title": "", "sources": [], "images": [], "actions": [],
+    "plan": [], "report": "", "network": {"checks": [], "note": "Not run."},
+    "elapsed": 0,
+}
+events: list[dict[str, str]] = []
+clients: set[WebSocket] = set()
+task_runner: asyncio.Task | None = None
+started_at: float | None = None
 
-# ==========================================
-# 1. CORE EXISTNG BASE ROUTE ENGINE (OLD CORE LOGIC)
-# ==========================================
-@app.get("/")
-async def root_index(request: Request):
-    return JSONResponse({
-        "status": "online",
-        "version": "0.5-updated",
-        "agent": "Nexus-AI Core Operating Unit",
-        "endpoints": {
-            "terminal_ui": "/automation/nexus-bypass",
-            "static_view": "/static/index.html"
-        }
-    })
 
-# ==========================================
-# 2. NEW ADVANCED AUTOMATION & BYPASS CONTROLLER
-# ==========================================
+def stamp() -> str:
+    return datetime.now(timezone.utc).astimezone().strftime("%H:%M:%S")
+
+
+def log(message: str, status: str = "info") -> dict[str, str]:
+    event = {"time": stamp(), "message": message, "status": status}
+    events.append(event)
+    del events[:-120]
+    return event
+
+
+async def broadcast(payload: dict[str, Any]) -> None:
+    stale = []
+    for ws in list(clients):
+        try:
+            await ws.send_text(json.dumps(payload))
+        except Exception:
+            stale.append(ws)
+    for ws in stale:
+        clients.discard(ws)
+
+
+async def publish(message: str, status: str = "info") -> None:
+    event = log(message, status)
+    await broadcast({"type": "event", "event": event})
+    await broadcast({"type": "state", "state": state, "events": events[-40:]})
+
+
+class StartRequest(BaseModel):
+    task: str = Field(min_length=1, max_length=2000)
+    start_url: str = Field(default="", max_length=2048)
+
+
+class SelectorCheckRequest(BaseModel):
+    html: str = Field(min_length=1, max_length=1_000_000)
+    selectors: list[str] = Field(default_factory=list, max_length=30)
+
+
+async def run_placeholder_research(task_text: str, start_url: str) -> None:
+    """Honest task lifecycle until a real research provider is configured."""
+    global started_at
+    started_at = time.monotonic()
+    state.update(status="running", phase="Task accepted", action="Validating task", report="")
+    await publish("Task accepted. No browser actions have been performed.", "success")
+    if start_url:
+        parsed = urlparse(start_url)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            state.update(status="failed", phase="Invalid URL", action="Provide a valid public HTTP(S) URL.")
+            await publish("Starting URL must be a valid HTTP or HTTPS URL.", "failed")
+            return
+        state["current_url"] = start_url
+    state.update(status="idle", phase="Ready for research integration", action="Backend connection is working; research provider is not configured.")
+    state["report"] = (
+        "NEXUS backend is connected. This build repairs the dashboard/API lifecycle and adds "
+        "selector diagnostics. A live research/browser provider is not configured, so no web "
+        "research or browser interaction was run."
+    )
+    state["elapsed"] = round(time.monotonic() - (started_at or time.monotonic()), 2)
+    await publish("Task lifecycle check completed. Research engine is not configured; no simulated results were created.", "warning")
+
+
+@app.get("/", response_class=JSONResponse)
+async def root_index():
+    return {"status": "online", "version": app.version, "agent": "Nexus AI", "dashboard": "/automation/nexus-bypass", "health": "/health"}
+
+
+@app.get("/health")
+async def health():
+    return {"ok": True, "status": "healthy", "version": app.version}
+
+
 @app.get("/automation/nexus-bypass", response_class=HTMLResponse)
-async def serve_nexus_bypass(request: Request):
-    html_content = """
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Nexus Automation Terminal Hub</title>
-        <style>
-            body { 
-                background-color: #08080c; 
-                color: #e2e8f0; 
-                font-family: 'SF Pro Display', -apple-system, 'Segoe UI', monospace; 
-                margin: 0; 
-                padding: 10px;
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                justify-content: center;
-                min-height: 100vh;
-            }
-            #nexus-panel { 
-                border: 1px solid #1e1e2f; 
-                background: #0f0f17; 
-                border-radius: 12px; 
-                padding: 24px; 
-                width: 90%;
-                max-width: 550px; 
-                box-shadow: 0 10px 40px rgba(0,0,0,0.8); 
-            }
-            .terminal-header { 
-                display: flex; 
-                justify-content: space-between; 
-                align-items: center; 
-                border-bottom: 1px solid #1e1e2f; 
-                padding-bottom: 14px; 
-                margin-bottom: 18px; 
-            }
-            .terminal-header h3 {
-                margin: 0;
-                font-size: 16px;
-                letter-spacing: 1px;
-                color: #38bdf8;
-            }
-            .mode-btn { 
-                background: #141522; 
-                color: #00ffcc; 
-                border: 1px solid #00ffcc; 
-                padding: 6px 14px; 
-                border-radius: 6px; 
-                cursor: pointer; 
-                font-weight: bold; 
-                font-size: 11px;
-                transition: all 0.2s ease;
-            }
-            .mode-btn.normal { 
-                color: #94a3b8; 
-                border-color: #334155; 
-            }
-            #log-stream { 
-                background: #050508; 
-                border: 1px solid #141522; 
-                height: 280px; 
-                overflow-y: auto; 
-                padding: 12px; 
-                border-radius: 8px; 
-                font-size: 12px; 
-                color: #cbd5e1; 
-                line-height: 1.6; 
-            }
-            .log-entry { 
-                margin-bottom: 8px; 
-                border-left: 2px solid #00ffcc; 
-                padding-left: 10px; 
-                animation: fadeIn 0.2s ease;
-            }
-            .log-entry.system { border-color: #38bdf8; color: #38bdf8; }
-            .log-entry.success { border-color: #4ade80; color: #4ade80; }
-            .log-entry.alert { border-color: #f87171; color: #f87171; }
-            
-            @keyframes fadeIn {
-                from { opacity: 0; transform: translateY(2px); }
-                to { opacity: 1; transform: translateY(0); }
-            }
-        </style>
-    </head>
-    <body>
+async def dashboard():
+    page = STATIC_DIR / "index.html"
+    if not page.exists():
+        return HTMLResponse("Dashboard file missing", status_code=500)
+    return HTMLResponse(page.read_text(encoding="utf-8"))
 
-        <div id="nexus-panel">
-            <div class="terminal-header">
-                <h3>NEXUS SYSTEM CONTROLLER</h3>
-                <button id="mode-toggle" class="mode-btn">AUTOMATION ACTIVE</button>
-            </div>
-            <div id="log-stream">
-                <div class="log-entry system">> Landed on target bypass terminal window layer.</div>
-            </div>
-        </div>
 
-        <script>
-            let config = { automationMode: true, currentAdTask: 0, maxAds: 3 };
-            const logsBox = document.getElementById('log-stream');
-            const toggleBtn = document.getElementById('mode-toggle');
+@app.get("/api/status")
+async def api_status():
+    if started_at and state["status"] == "running":
+        state["elapsed"] = round(time.monotonic() - started_at, 2)
+    return {"state": state, "events": events[-40:]}
 
-            function appendLog(msg, type = '') {
-                const div = document.createElement('div');
-                div.className = 'log-entry ' + type;
-                div.innerText = `> [${new Date().toLocaleTimeString()}] ${msg}`;
-                logsBox.appendChild(div);
-                logsBox.scrollTop = logsBox.scrollHeight;
-            }
 
-            toggleBtn.addEventListener('click', () => {
-                config.automationMode = !config.automationMode;
-                if(config.automationMode) {
-                    toggleBtn.innerText = "AUTOMATION ACTIVE";
-                    toggleBtn.className = "mode-btn";
-                    appendLog("Switched back to Hyper Fast Automation System.", "system");
-                    triggerAutomationSequence();
-                } else {
-                    toggleBtn.innerText = "NORMAL MODE";
-                    toggleBtn.className = "mode-btn normal";
-                    appendLog("Switched to Normal Manual Flow mode. Automation paused.", "alert");
-                }
-            });
+@app.post("/api/start")
+async def api_start(payload: StartRequest):
+    global task_runner
+    if task_runner and not task_runner.done():
+        return JSONResponse({"error": "A task is already running."}, status_code=409)
+    task_runner = asyncio.create_task(run_placeholder_research(payload.task.strip(), payload.start_url.strip()))
+    return {"ok": True, "message": "Task accepted", "status": "running"}
 
-            // Structural Matrix Verification Sequence (No text reliance)
-            let executionLoop;
-            function triggerAutomationSequence() {
-                if(executionLoop) clearInterval(executionLoop);
-                
-                executionLoop = setInterval(() => {
-                    if(!config.automationMode) return;
-                    
-                    if(config.currentAdTask < config.maxAds) {
-                        config.currentAdTask++;
-                        appendLog(`Doing Ad Task Number ${config.currentAdTask} of 3... Extracting genuine structural matrices.`);
-                    } else {
-                        clearInterval(executionLoop);
-                        appendLog("All 3 Ads processing segments handled successfully!", "success");
-                        appendLog("Now showing Free Access element tokens on execution matrix.", "system");
-                        appendLog("Clicked on target layout node node. Destination link sequence active.", "success");
-                    }
-                }, 2000); // Super-fast 2 seconds polling block emulation
-            }
 
-            // Initializing Engine Flow execution
-            triggerAutomationSequence();
-        </script>
-    </body>
-    </html>
-    """
-    return HTMLResponse(content=html_content, status_code=200)
+@app.post("/api/stop")
+async def api_stop():
+    global task_runner
+    if task_runner and not task_runner.done():
+        task_runner.cancel()
+        try:
+            await task_runner
+        except asyncio.CancelledError:
+            pass
+    state.update(status="stopped", phase="Stopped", action="Task stopped by user.")
+    await publish("Task stopped by user.", "warning")
+    return {"ok": True, "status": "stopped"}
+
+
+@app.post("/api/diagnostics/selectors")
+async def selector_diagnostics(payload: SelectorCheckRequest):
+    # Parse in the user's browser with DOMParser; this endpoint intentionally
+    # accepts only a static HTML snapshot and never visits/clicks a third-party site.
+    return {"ok": True, "message": "Send the HTML snapshot to the dashboard's local DOMParser diagnostic.", "selector_count": len(payload.selectors)}
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(ws: WebSocket):
+    await ws.accept()
+    clients.add(ws)
+    await ws.send_text(json.dumps({"type": "state", "state": state, "events": events[-40:]}))
+    try:
+        while True:
+            message = await ws.receive_text()
+            try:
+                data = json.loads(message)
+            except json.JSONDecodeError:
+                continue
+            if data.get("type") == "ping":
+                await ws.send_text(json.dumps({"type": "pong"}))
+    except WebSocketDisconnect:
+        clients.discard(ws)
+    except Exception:
+        clients.discard(ws)
+
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.environ.get("PORT", 10000))
-    uvicorn.run("app.main:app", host="0.0.0.0", port=port)
+    uvicorn.run("app.main:app", host="0.0.0.0", port=int(os.environ.get("PORT", "10000")))
