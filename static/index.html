@@ -1,124 +1,1159 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
+
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>NEXUS AI v0.5</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Nexus AI Dashboard</title>
+
 <style>
-*{box-sizing:border-box}body{margin:0;background:#080b12;color:#edf1fa;font-family:Inter,Arial,sans-serif}
-header{min-height:65px;border-bottom:1px solid #202737;display:flex;align-items:center;justify-content:space-between;padding:0 22px}
-.logo{font-size:21px;font-weight:800;letter-spacing:2px}.logo span{color:#72a7ff}.connection{font-size:12px;color:#59dca3}
-nav{display:flex;gap:8px;padding:15px 22px;border-bottom:1px solid #202737;overflow-x:auto}
-nav button{background:#121a29;color:#aab5c9;border:1px solid #26344a;padding:10px 16px;border-radius:8px;white-space:nowrap;cursor:pointer}
-nav button.active{background:#1c3155;color:white;border-color:#538bdf}
-main{max-width:1250px;margin:auto;padding:22px}.panel{background:#101725;border:1px solid #202d41;border-radius:13px;padding:19px;margin-bottom:17px}
-h2{font-size:17px;margin-top:0}small,.muted{color:#8192ad}
-textarea,input{width:100%;background:#080e19;border:1px solid #293951;color:white;border-radius:8px;padding:13px;margin-bottom:10px;font-size:14px}
-textarea{min-height:95px;resize:vertical}.primary,.stop{color:white;border:0;padding:12px 20px;border-radius:8px;font-weight:700;cursor:pointer}
-.primary{background:#397be0}.stop{background:#a83f50}
-.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.metric{background:#0a1220;border:1px solid #26344b;border-radius:9px;padding:14px}
-.metric strong{font-size:23px;display:block;margin-top:7px}.progress{height:7px;background:#202c40;border-radius:10px;overflow:hidden;margin-top:13px}
-.progress div{height:100%;width:0;background:#5b9cff;transition:width .3s}.activity{max-height:420px;overflow-y:auto}
-.event{display:flex;gap:12px;border-bottom:1px solid #1d293a;padding:11px 0;font-size:13px;align-items:flex-start}.event time{color:#8295b2;min-width:65px}
-.tag{min-width:95px;font-size:11px}.event-message{overflow-wrap:anywhere;flex:1}
-.ok{color:#43df91}.bad{color:#ff6577}.warn{color:#f4c76b}.run{color:#72a7ff}
-.source{background:#0a1220;padding:13px;border:1px solid #25344b;border-radius:9px;margin-bottom:9px}
-.source a,.image-card a{color:#80b1ff;text-decoration:none;font-weight:600;overflow-wrap:anywhere}
-.source small{display:block;margin-top:7px;overflow-wrap:anywhere}
-#browserImage{width:100%;border-radius:9px;background:#05080e;min-height:180px;object-fit:contain}
-.report{white-space:pre-wrap;line-height:1.7;font-size:14px;overflow-wrap:anywhere}.hidden{display:none}
-.image-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
-.image-card{background:#0a1220;border:1px solid #25344b;border-radius:9px;padding:9px;min-width:0}
-.image-card img{width:100%;height:105px;object-fit:contain;background:#05080e;border-radius:6px}
-.image-card small{display:block;overflow-wrap:anywhere;margin-top:7px}
-.badge{display:inline-block;border-radius:20px;padding:4px 9px;font-size:11px;background:#14251e;color:#43df91}
-.diagnostic{font-size:13px;line-height:1.7;overflow-wrap:anywhere}
-.bottom-report{border:1px solid #236b4c;background:linear-gradient(145deg,#0b2119,#101725);box-shadow:0 0 25px #1b8c5520}
-@media(max-width:750px){.grid{grid-template-columns:repeat(2,1fr)}main{padding:13px}.tag{min-width:75px}}
-</style></head>
+
+:root {
+    --bg: #0b1020;
+    --panel: #141c30;
+    --panel2: #1b2740;
+    --border: #293752;
+    --text: #e8eefc;
+    --muted: #91a0ba;
+    --blue: #5795ff;
+    --green: #32d296;
+    --red: #ff647c;
+    --yellow: #ffc857;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: Arial, sans-serif;
+}
+
+button,
+input,
+select {
+    font: inherit;
+}
+
+button {
+    cursor: pointer;
+}
+
+.app {
+    display: flex;
+    min-height: 100vh;
+}
+
+/* SIDEBAR */
+
+.sidebar {
+    width: 245px;
+    background: #10182a;
+    border-right: 1px solid var(--border);
+    padding: 22px 14px;
+    flex-shrink: 0;
+}
+
+.logo {
+    font-size: 24px;
+    font-weight: bold;
+    margin: 0 0 8px;
+}
+
+.logo span {
+    color: var(--blue);
+}
+
+.version {
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 30px;
+}
+
+.nav-button {
+    display: block;
+    width: 100%;
+    padding: 13px;
+    margin: 5px 0;
+    text-align: left;
+    border: 0;
+    border-radius: 9px;
+    color: var(--muted);
+    background: transparent;
+}
+
+.nav-button:hover,
+.nav-button.active {
+    color: white;
+    background: var(--panel2);
+}
+
+/* MAIN */
+
+.main {
+    flex: 1;
+    min-width: 0;
+    padding: 25px;
+}
+
+.topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 15px;
+    flex-wrap: wrap;
+    margin-bottom: 24px;
+}
+
+h1 {
+    font-size: 25px;
+    margin: 0;
+}
+
+h2 {
+    font-size: 18px;
+    margin-top: 0;
+}
+
+.subtitle {
+    color: var(--muted);
+    font-size: 13px;
+    margin-top: 7px;
+}
+
+/* CARDS */
+
+.grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px;
+    margin-bottom: 16px;
+}
+
+.stat-label {
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.stat-value {
+    font-size: 23px;
+    font-weight: bold;
+    margin-top: 10px;
+}
+
+.muted {
+    color: var(--muted);
+}
+
+/* BUTTONS */
+
+.btn {
+    border: 0;
+    padding: 10px 15px;
+    border-radius: 8px;
+    background: var(--blue);
+    color: white;
+    font-weight: bold;
+    margin: 3px;
+}
+
+.btn:hover {
+    opacity: .85;
+}
+
+.btn.secondary {
+    background: #34435e;
+}
+
+.btn.success {
+    background: #168b65;
+}
+
+.btn.danger {
+    background: #b93851;
+}
+
+.btn.warning {
+    background: #a7791d;
+}
+
+/* INPUTS */
+
+input,
+select {
+    background: #0e1729;
+    color: white;
+    border: 1px solid var(--border);
+    padding: 11px;
+    border-radius: 8px;
+    width: 100%;
+    outline: none;
+}
+
+input:focus {
+    border-color: var(--blue);
+}
+
+.input-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.input-row input {
+    flex: 1;
+    min-width: 200px;
+}
+
+/* SECTIONS */
+
+.section {
+    display: none;
+}
+
+.section.active {
+    display: block;
+}
+
+/* STATUS */
+
+.status {
+    display: inline-block;
+    padding: 6px 10px;
+    border-radius: 20px;
+    font-size: 12px;
+    background: #293752;
+}
+
+.status.online {
+    color: var(--green);
+    background: #12382f;
+}
+
+.status.offline {
+    color: var(--red);
+    background: #421e2a;
+}
+
+.status.warning {
+    color: var(--yellow);
+    background: #40351d;
+}
+
+/* TABLE */
+
+.table-wrap {
+    overflow-x: auto;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+th,
+td {
+    padding: 12px;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+}
+
+th {
+    color: var(--muted);
+}
+
+/* LOG */
+
+.log {
+    background: #080e1a;
+    border: 1px solid var(--border);
+    padding: 12px;
+    border-radius: 8px;
+    max-height: 280px;
+    overflow-y: auto;
+    font-size: 12px;
+}
+
+.log-entry {
+    padding: 7px 0;
+    border-bottom: 1px solid #1b2940;
+    overflow-wrap: anywhere;
+}
+
+/* INSPECTOR */
+
+.inspector {
+    background: #080e1a;
+    border: 1px solid var(--border);
+    padding: 14px;
+    border-radius: 9px;
+    overflow-wrap: anywhere;
+}
+
+.inspector-row {
+    padding: 8px 0;
+    border-bottom: 1px solid #25314a;
+    font-size: 13px;
+}
+
+.inspector-row strong {
+    color: var(--blue);
+}
+
+/* ELEMENT */
+
+.element-item {
+    background: #0d1729;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin: 8px 0;
+    cursor: pointer;
+}
+
+.element-item.selected {
+    border-color: var(--blue);
+}
+
+.notice {
+    border-left: 4px solid var(--yellow);
+    padding: 12px;
+    background: #302919;
+    border-radius: 5px;
+    font-size: 13px;
+    margin: 12px 0;
+}
+
+.empty {
+    color: var(--muted);
+    padding: 15px;
+    text-align: center;
+}
+
+@media(max-width: 750px) {
+
+    .app {
+        display: block;
+    }
+
+    .sidebar {
+        width: 100%;
+        border-right: 0;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .main {
+        padding: 15px;
+    }
+
+}
+
+</style>
+</head>
+
 <body>
-<header><div class="logo">NEXUS<span> AI</span> <small>v0.5</small></div><div class="connection" id="connection">● CONNECTING</div></header>
-<nav>
-<button class="active" onclick="setLayer(1,this)">Overview</button>
-<button onclick="setLayer(2,this)">Research & Sources</button>
-<button onclick="setLayer(3,this)">Browser</button>
-<button onclick="setLayer(4,this)">Images</button>
-<button onclick="setLayer(5,this)">Actions & Diagnostics</button>
-</nav>
-<main>
-<section id="overview">
-<div class="panel"><h2>Research Command</h2>
-<textarea id="task" placeholder="Example: Open YouTube, search for science documentaries, then click the unique “Videos” button"></textarea>
-<input id="startUrl" placeholder="Starting website URL (example: https://www.youtube.com) — optional">
-<button class="primary" onclick="startTask()">START NEXUS</button> <button class="stop" onclick="stopTask()">STOP</button>
-<p class="muted" id="statusText">Waiting for instruction.</p></div>
-<div class="panel"><h2>Live Progress</h2><div class="grid">
-<div class="metric"><small>COLLECTED</small><strong id="collected">0</strong></div>
-<div class="metric"><small>ANALYSED</small><strong id="analysed">0</strong></div>
-<div class="metric"><small>TARGET</small><strong id="target">12</strong></div>
-<div class="metric"><small>STATUS</small><strong id="status">IDLE</strong></div></div>
-<div class="progress"><div id="progressBar"></div></div></div>
-<div class="panel"><h2>Current Action</h2><div id="currentAction">Waiting for NEXUS...</div><p class="muted" id="currentUrl"></p></div>
-<div class="panel"><h2>Live Activity</h2><div class="activity" id="activity"><p class="muted">No activity yet.</p></div></div>
-</section>
 
-<section id="details" class="hidden">
-<div class="panel"><h2>Research Plan</h2><pre id="planList" class="muted">No plan yet.</pre></div>
-<div class="panel"><h2>Discovered Sources — clickable original pages</h2><div id="sources">No sources collected yet.</div></div>
-<div class="panel"><h2>Research Report</h2><div class="report" id="report">Your report will appear here.</div></div>
-</section>
+<div class="app">
 
-<section id="browser" class="hidden">
-<div class="panel"><h2>Remote Chromium</h2><p class="muted">Live preview is refreshed only while this tab is open. Text extraction does not wait for images.</p>
-<img id="browserImage" alt="Browser preview"></div>
-<div class="panel"><h2>Browser Information</h2><p id="browserUrl">No active page.</p><p id="browserTitle"></p></div>
-</section>
+<!-- SIDEBAR -->
 
-<section id="images" class="hidden">
-<div class="panel"><h2>Separate Visual Results</h2><p class="muted">Images are collected separately from text research. In this build, the browser blocks image downloads for speed but extracts image URLs and metadata where available. Previews load independently in this dashboard.</p>
-<div id="imageStatus" class="muted">No image URLs extracted yet.</div><div class="image-grid" id="imageGrid"></div></div>
-</section>
+<aside class="sidebar">
 
-<section id="diagnostics" class="hidden">
-<div class="panel"><h2>Linkvertise Selector Diagnostic</h2>
-<p class="muted">Paste a DOM snapshot from the page you are inspecting. This runs read-only selector checks locally in this dashboard; it does not click ads, skip ads, or simulate rewards.</p>
-<textarea id="selectorHtml" placeholder="Paste page HTML snapshot here (outerHTML)..."></textarea>
-<button class="primary" onclick="runSelectorDiagnostics()">RUN SELECTOR CHECKS</button>
-<div id="selectorResults" class="diagnostic" aria-live="polite">No selector test run yet.</div>
+    <div class="logo">
+        Nexus<span>AI</span>
+    </div>
+
+    <div class="version">
+        Browser Intelligence v0.7.0
+    </div>
+
+    <button class="nav-button active" data-section="overview">
+        ◈ Overview
+    </button>
+
+    <button class="nav-button" data-section="browser">
+        ◉ Browser
+    </button>
+
+    <button class="nav-button" data-section="elements">
+        ⌕ Element Detection
+    </button>
+
+    <button class="nav-button" data-section="inspector">
+        ◫ Technical Inspector
+    </button>
+
+    <button class="nav-button" data-section="diagnostics">
+        ◈ Diagnostics
+    </button>
+
+    <button class="nav-button" data-section="ads">
+        ◉ Ad/Reward Detection
+    </button>
+
+    <button class="nav-button" data-section="actions">
+        ⚙ Actions & Approval
+    </button>
+
+    <button class="nav-button" data-section="research">
+        ◎ Research & Sources
+    </button>
+
+    <button class="nav-button" data-section="images">
+        ▧ Images
+    </button>
+
+    <button class="nav-button" data-section="activity">
+        ☷ Activity Log
+    </button>
+
+</aside>
+
+
+<!-- MAIN -->
+
+<main class="main">
+
+<div class="topbar">
+
+    <div>
+        <h1 id="pageTitle">Overview</h1>
+
+        <div class="subtitle">
+            Nexus AI browser monitoring dashboard
+        </div>
+    </div>
+
+    <div>
+        <span id="connectionStatus" class="status offline">
+            Disconnected
+        </span>
+    </div>
+
 </div>
-<div class="panel"><h2>Action Verification</h2><p class="muted">Green means the action completed; red means it failed; amber means it was attempted but could not be confirmed.</p>
-<div id="actionSummary" class="diagnostic">No actions yet.</div><div class="activity" id="actionLog"></div></div>
-<div class="panel"><h2>Connectivity Diagnostics</h2><div id="networkInfo" class="diagnostic">Not tested yet.</div></div>
+
+
+<!-- OVERVIEW -->
+
+<section id="overview" class="section active">
+
+    <div class="grid">
+
+        <div class="card">
+            <div class="stat-label">Browser Status</div>
+            <div class="stat-value" id="browserStatus">
+                Stopped
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="stat-label">Active URL</div>
+            <div class="stat-value" style="font-size:14px" id="activeUrl">
+                None
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="stat-label">Detected Elements</div>
+            <div class="stat-value" id="elementCount">
+                0
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="stat-label">Pending Approvals</div>
+            <div class="stat-value" id="approvalCount">
+                0
+            </div>
+        </div>
+
+    </div>
+
+    <div class="card">
+
+        <h2>Quick Browser Controls</h2>
+
+        <div class="input-row">
+
+            <input
+                id="quickUrl"
+                type="url"
+                placeholder="https://example.com"
+            >
+
+            <button class="btn" onclick="startBrowser()">
+                Start Browser
+            </button>
+
+            <button class="btn danger" onclick="stopBrowser()">
+                Stop Browser
+            </button>
+
+        </div>
+
+    </div>
+
+    <div class="card">
+
+        <h2>System Information</h2>
+
+        <p class="muted">
+            Nexus AI v0.7.0
+        </p>
+
+        <p class="muted">
+            Chromium browser engine
+        </p>
+
+        <p class="muted">
+            Live DOM monitoring
+        </p>
+
+        <p class="muted">
+            Approval-based safe actions
+        </p>
+
+    </div>
+
 </section>
 
-<section class="panel bottom-report">
-<h2>🟢 WHAT NEXUS ACTUALLY DID & FOUND</h2>
-<div class="grid">
-<div><small>SUCCESSFUL ACTIONS</small><strong class="ok" id="successCount">0</strong></div>
-<div><small>FAILED ACTIONS</small><strong class="bad" id="failedCount">0</strong></div>
-<div><small>WARNING / UNVERIFIED</small><strong class="warn" id="warningCount">0</strong></div>
-<div><small>IMAGE URLS</small><strong id="imageCount">0</strong></div>
-</div>
-<p id="bottomStatus" class="muted">Waiting for a task.</p>
-<div id="bottomFindings" class="report">Final findings and clickable source links will appear here.</div>
+
+<!-- BROWSER -->
+
+<section id="browser" class="section">
+
+    <div class="card">
+
+        <h2>Browser Navigation</h2>
+
+        <div class="input-row">
+
+            <input
+                id="browserUrl"
+                type="url"
+                placeholder="Enter public website URL"
+            >
+
+            <button class="btn" onclick="navigateBrowser()">
+                Navigate
+            </button>
+
+        </div>
+
+        <div style="margin-top:12px">
+
+            <button class="btn success" onclick="startBrowser()">
+                Start
+            </button>
+
+            <button class="btn danger" onclick="stopBrowser()">
+                Stop
+            </button>
+
+            <button class="btn secondary" onclick="refreshStatus()">
+                Refresh Status
+            </button>
+
+        </div>
+
+    </div>
+
+    <div class="card">
+
+        <h2>Browser Information</h2>
+
+        <p id="browserInfo" class="muted">
+            Browser is not running.
+        </p>
+
+    </div>
+
+    <div class="notice">
+        Browser navigation is limited to public HTTP/HTTPS destinations.
+        Private and local network destinations are blocked.
+    </div>
+
 </section>
+
+
+<!-- ELEMENT DETECTION -->
+
+<section id="elements" class="section">
+
+    <div class="card">
+
+        <h2>Live Element Detection</h2>
+
+        <p class="muted">
+            Detect ordinary buttons and inspect their current status.
+        </p>
+
+        <button class="btn" onclick="scanElements()">
+            Scan Elements
+        </button>
+
+        <button class="btn secondary" onclick="previousElement()">
+            Previous
+        </button>
+
+        <button class="btn secondary" onclick="nextElement()">
+            Next
+        </button>
+
+        <div id="elementNavigation" class="muted" style="margin-top:12px">
+            No elements loaded.
+        </div>
+
+    </div>
+
+    <div class="card">
+
+        <h2>Detected Elements</h2>
+
+        <div id="elementList" class="empty">
+            Start browser and scan.
+        </div>
+
+    </div>
+
+</section>
+
+
+<!-- INSPECTOR -->
+
+<section id="inspector" class="section">
+
+    <div class="card">
+
+        <h2>Technical Inspector</h2>
+
+        <div class="input-row">
+
+            <input
+                id="inspectSelector"
+                placeholder="CSS selector e.g. button"
+            >
+
+            <button class="btn" onclick="inspectElement()">
+                Inspect
+            </button>
+
+        </div>
+
+    </div>
+
+    <div class="card">
+
+        <h2>Element Details</h2>
+
+        <div id="inspectorOutput" class="inspector">
+            No element selected.
+        </div>
+
+    </div>
+
+</section>
+
+
+<!-- DIAGNOSTICS -->
+
+<section id="diagnostics" class="section">
+
+    <div class="card">
+
+        <h2>Selector Diagnostics</h2>
+
+        <p class="muted">
+            Check predefined selectors for presence, visibility
+            and clickability.
+        </p>
+
+        <button class="btn" onclick="runDiagnostics()">
+            Run Diagnostics
+        </button>
+
+    </div>
+
+    <div class="card">
+
+        <h2>Diagnostic Results</h2>
+
+        <div id="diagnosticResults" class="table-wrap">
+            <div class="empty">
+                No diagnostics available.
+            </div>
+        </div>
+
+    </div>
+
+</section>
+
+
+<!-- ADS / REWARD DETECTION -->
+
+<section id="ads" class="section">
+
+    <div class="card">
+
+        <h2>Ad/Reward Detection</h2>
+
+        <div class="notice">
+            Detection-only mode. This section can identify and inspect
+            matching page elements. It does not click ads, skip ads,
+            simulate rewards or bypass access restrictions.
+        </div>
+
+        <button class="btn" onclick="runDiagnostics()">
+            Detect Known Selectors
+        </button>
+
+    </div>
+
+    <div class="card">
+
+        <h2>Detection Results</h2>
+
+        <div id="adResults">
+            <div class="empty">
+                Run detection to see results.
+            </div>
+        </div>
+
+    </div>
+
+</section>
+
+
+<!-- ACTIONS -->
+
+<section id="actions" class="section">
+
+    <div class="card">
+
+        <h2>Approval-Based Actions</h2>
+
+        <p class="muted">
+            Select an ordinary button using its CSS selector.
+            The target is checked before an approval request.
+        </p>
+
+        <input
+            id="actionSelector"
+            placeholder="CSS selector for an ordinary button"
+        >
+
+        <button class="btn" onclick="prepareAction()">
+            Inspect & Request Approval
+        </button>
+
+    </div>
+
+    <div class="card">
+
+        <h2>Approval Preview</h2>
+
+        <div id="approvalPreview" class="inspector">
+            No action awaiting approval.
+        </div>
+
+        <div id="approvalButtons" style="display:none">
+
+            <button class="btn success" onclick="approveAction()">
+                Approve
+            </button>
+
+            <button class="btn danger" onclick="rejectAction()">
+                Reject
+            </button>
+
+        </div>
+
+    </div>
+
+    <div class="notice">
+        Sensitive, irreversible, financial, account-related and
+        ad/reward actions are restricted.
+    </div>
+
+</section>
+
+
+<!-- RESEARCH -->
+
+<section id="research" class="section">
+
+    <div class="card">
+
+        <h2>Research & Sources</h2>
+
+        <p class="muted">
+            Research engine is not implemented in this backend version.
+        </p>
+
+        <span class="status warning">
+            Coming Later
+        </span>
+
+    </div>
+
+</section>
+
+
+<!-- IMAGES -->
+
+<section id="images" class="section">
+
+    <div class="card">
+
+        <h2>Images</h2>
+
+        <p class="muted">
+            Image discovery and image processing are pending integration.
+        </p>
+
+        <span class="status warning">
+            Coming Later
+        </span>
+
+    </div>
+
+</section>
+
+
+<!-- ACTIVITY -->
+
+<section id="activity" class="section">
+
+    <div class="card">
+
+        <h2>Live Activity Log</h2>
+
+        <button class="btn secondary" onclick="clearLogs()">
+            Clear Log
+        </button>
+
+        <div id="activityLog" class="log" style="margin-top:15px">
+            <div class="empty">
+                Waiting for events...
+            </div>
+        </div>
+
+    </div>
+
+</section>
+
 </main>
+
+</div>
+
+
 <script>
-const $=id=>document.getElementById(id);let socket=null,currentLayer=1,lastState={};
-const sections={1:"overview",2:"details",3:"browser",4:"images",5:"diagnostics"};
-function setLayer(n,b){currentLayer=n;document.querySelectorAll("nav button").forEach(x=>x.classList.remove("active"));if(b)b.classList.add("active");
-Object.entries(sections).forEach(([k,id])=>$(id).classList.toggle("hidden",Number(k)!==n));
-if(socket&&socket.readyState===1)socket.send(JSON.stringify({type:"layer",layer:n}));}
-async function startTask(){const task=$("task").value.trim(),start_url=$("startUrl").value.trim();if(!task){alert("Enter a task first.");return}
-$("statusText").textContent="Starting NEXUS...";try{const r=await fetch("/api/start",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({task,start_url})});
-const d=await r.json();if(!r.ok)throw Error(d.error||"Could not start");$("statusText").textContent="NEXUS started."}catch(e){$("statusText").textContent=e.message}}
-async function stopTask(){try{await fetch("/api/stop",{method:"POST"})}catch(e){console.error(e)}}
-function esc(v){return String(v||"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;")}
-function statusClass(s){s=(s||"").toLowerCase();return s==="success"||s==="collected"||s==="analysed"?"ok":s==="failed"||s==="error"?"bad":s==="warning"||s==="warn"?"warn":"run"}
-function renderState(s){lastState=s;$("collected").textContent=s.collected??0;$("analysed").textContent=s.analysed??0;$("target").textContent=s.target??12;$("status").textContent=(s.status||"idle").toUpperCase();
-$("progressBar").style.width=(s.target?Math.min(100,(s.collected||0)/s.target*100):0)+"%";
-$("currentAction").textContent=s.action||"Waiting...";$("currentUrl").textContent=s.current_url||"";
-$("statusText").textContent=(s.phase||"Ready")+" · "+(s.status||"idle");$("browserUrl").textContent=s.current_url||"No active page";$("browserTitle").textContent=s.current_title||"";
-$("planList").textContent=s.plan?JSON.stringify(s.plan,null,2):"No plan yet.";
+
+/* =========================================================
+   GLOBAL STATE
+========================================================= */
+
+const API = "";
+
+let socket = null;
+
+let browserRunning = false;
+
+let detectedElements = [];
+
+let selectedElementIndex = -1;
+
+let currentApprovalToken = null;
+
+let approvalTimer = null;
+
+let lastClickableStates = {};
+
+
+/* =========================================================
+   NAVIGATION
+========================================================= */
+
+document.querySelectorAll(".nav-button").forEach(button => {
+
+    button.addEventListener("click", () => {
+
+        document.querySelectorAll(".nav-button")
+            .forEach(item => item.classList.remove("active"));
+
+        document.querySelectorAll(".section")
+            .forEach(item => item.classList.remove("active"));
+
+        button.classList.add("active");
+
+        const section = button.dataset.section;
+
+        document.getElementById(section)
+            .classList.add("active");
+
+        document.getElementById("pageTitle")
+            .textContent = button.textContent.trim();
+
+    });
+
+});
+
+
+/* =========================================================
+   API HELPER
+========================================================= */
+
+async function api(path, options = {}) {
+
+    const response = await fetch(API + path, {
+
+        headers: {
+            "Content-Type": "application/json",
+            ...(options.headers || {})
+        },
+
+        ...options
+
+    });
+
+    let data = {};
+
+    try {
+        data = await response.json();
+    } catch {
+        data = {};
+    }
+
+    if (!response.ok) {
+
+        throw new Error(
+            data.detail || "Request failed"
+        );
+
+    }
+
+    return data;
+
+}
+
+
+/* =========================================================
+   LOGGING
+========================================================= */
+
+function log(message, type = "INFO") {
+
+    const container =
+        document.getElementById("activityLog");
+
+    const empty = container.querySelector(".empty");
+
+    if (empty) {
+        empty.remove();
+    }
+
+    const entry = document.createElement("div");
+
+    entry.className = "log-entry";
+
+    const timestamp =
+        new Date().toLocaleTimeString();
+
+    entry.textContent =
+        `[${timestamp}] [${type}] ${message}`;
+
+    container.prepend(entry);
+
+}
+
+
+function clearLogs() {
+
+    document.getElementById("activityLog").innerHTML =
+        '<div class="empty">Waiting for events...</div>';
+
+}
+
+
+/* =========================================================
+   WEBSOCKET
+========================================================= */
+
+function connectWebSocket() {
+
+    if (
+        socket &&
+        (
+            socket.readyState === WebSocket.OPEN ||
+            socket.readyState === WebSocket.CONNECTING
+        )
+    ) {
+        return;
+    }
+
+    const protocol =
+        location.protocol === "https:"
+            ? "wss:"
+            : "ws:";
+
+    socket = new WebSocket(
+        `${protocol}//${location.host}/ws`
+    );
+
+    socket.onopen = () => {
+
+        setConnection(true);
+
+        log("WebSocket connected");
+
+    };
+
+    socket.onmessage = event => {
+
+        let message;
+
+        try {
+            message = JSON.parse(event.data);
+        } catch {
+            return;
+        }
+
+        handleSocketEvent(message);
+
+    };
+
+    socket.onclose = () => {
+
+        setConnection(false);
+
+        log("WebSocket disconnected", "WARNING");
+
+        setTimeout(connectWebSocket, 3000);
+
+    };
+
+    socket.onerror = () => {
+
+        setConnection(false);
+
+    };
+
+}
+
+
+function setConnection(connected) {
+
+    const badge =
+        document.getElementById("connectionStatus");
+
+    badge.textContent =
+        connected ? "Connected" : "Disconnected";
+
+    badge.className =
+        connected
+            ? "status online"
+            : "status offline";
+
+}
+
+
+function handleSocketEvent(message) {
+
+    const data = message.data || {};
+
+    switch (message.type) {
+
+        case "connected":
+
+            log("Connected to Nexus AI");
+
+            break;
+
+        case "browser_started":
+
+            browserRunning = true;
+
+            updateBrowserStatus();
+
+            log("Browser started");
+
+            break;
+
+        case "browser_stopped":
+
+            browserRunning = false;
+
+            updateBrowserStatus();
+
+            log("Browser stopped");
+
+            break;
+
+        case "navigation_completed":
+
+            document.getElementById("activeUrl")
+                .textContent = data.url || "Unknown";
+
+            document.getElementById("browserInfo")
+                .textContent =
+                data.title || "Page loaded";
+
+            log("Navigation completed: " + data.url);
+
+            break;
+
+        case "dom_changed":
+
+            log(
+                "DOM updated: " +
+                (data.url || ""),
+                "DOM"
+            );
+
+            break;
+
+        case "action_completed":
+
+            log(
+                "Approved action completed",
+                "SUCCESS"
+            );
+
+            break;
+
+        case "post_action_scan":
+
+            log("Post-action scan event received");
+
+            scanElements().catch(() => {});
+
+            break;
+
+        case "error":
+
+            log(
+                data.message || "Unknown error",
+                "ERROR"
+            );
+
+            break;
+
+        default:
+
+            log("EvextContent=s.plan?JSON.stringify(s.plan,null,2):"No plan yet.";
 const a=s.sources||[];$("sources").innerHTML=a.length?a.map(x=>`<div class="source"><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.title||"Untitled source")}</a><small>${esc(x.status)}</small><small>${esc(x.url)}</small></div>`).join(""):'<p class="muted">No sources collected yet.</p>';
 const imgs=s.images||[];$("imageCount").textContent=imgs.length;$("imageStatus").textContent=imgs.length?`${imgs.length} image URL(s) extracted. Previews load separately and may depend on the source site's hotlink policy.`:"No image URLs extracted yet.";
 $("imageGrid").innerHTML=imgs.map(x=>`<div class="image-card"><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer"><img loading="lazy" src="${esc(x.url)}" alt="${esc(x.alt)}" onerror="this.style.opacity='.25';this.title='Preview unavailable; open original URL'"></a><small>${esc(x.alt||"Image")}</small><small>${esc(x.width)} × ${esc(x.height)}</small><small><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">Open original image ↗</a></small></div>`).join("");
