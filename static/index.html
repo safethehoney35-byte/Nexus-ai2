@@ -846,11 +846,16 @@ th {
         </button>
 
         <div id="activityLog" class="log" style="margin-top:15px">
-            <div class="empty">
-                Waiting for events...
-            </div>
+            <div class="empty">Waiting for events...</div>
         </div>
+    </div>
 
+    <div class="card">
+        <h2>Error Log</h2>
+        <p class="muted">Failures, selector issues and recovery attempts.</p>
+        <div id="errorLog" class="log" style="margin-top:15px">
+            <div class="empty">No errors recorded.</div>
+        </div>
     </div>
 
 </section>
@@ -877,6 +882,8 @@ let detectedElements = [];
 let selectedElementIndex = -1;
 
 let currentApprovalToken = null;
+let watchAdsApprovalRequested = false;
+let domScanTimer = null;
 
 let approvalTimer = null;
 
@@ -977,6 +984,17 @@ function log(message, type = "INFO") {
 
     container.prepend(entry);
 
+    if (["ERROR", "WARNING"].includes(type)) {
+        const errors = document.getElementById("errorLog");
+        if (errors) {
+            const emptyError = errors.querySelector(".empty");
+            if (emptyError) emptyError.remove();
+            const errorEntry = document.createElement("div");
+            errorEntry.className = "log-entry";
+            errorEntry.textContent = `[${timestamp}] [${type}] ${message}`;
+            errors.prepend(errorEntry);
+        }
+    }
 }
 
 
@@ -1112,16 +1130,19 @@ function handleSocketEvent(message) {
                 data.title || "Page loaded";
 
             log("Navigation completed: " + data.url);
+            watchAdsApprovalRequested = false;
+            setTimeout(() => runDiagnostics().catch(error => log(error.message, "ERROR")), 500);
 
             break;
 
         case "dom_changed":
 
-            log(
-                "DOM updated: " +
-                (data.url || ""),
-                "DOM"
-            );
+            // Debounce rapid mutations and refresh only the curated selector
+            // set; unrelated page text is never copied into the dashboard.
+            clearTimeout(domScanTimer);
+            domScanTimer = setTimeout(() => {
+                if (browserRunning) runDiagnostics().catch(error => log(error.message, "ERROR"));
+            }, 650);
 
             break;
 
@@ -1639,6 +1660,15 @@ async function runDiagnostics() {
             " selectors"
         );
 
+        // Ask for human approval only when the Watch Ads choice is present.
+        // The ad counter, ad CTA and Skip Ad remain detection-only.
+        const watchAds = (data.results || []).find(item => item.name === "Watch Ads option" && item.found);
+        if (watchAds && !watchAdsApprovalRequested && !currentApprovalToken) {
+            watchAdsApprovalRequested = true;
+            document.getElementById("actionSelector").value = watchAds.selector;
+            await prepareAction();
+        }
+
     } catch (error) {
 
         log(error.message, "ERROR");
@@ -1762,7 +1792,9 @@ function renderAdResults(results) {
 
         const mode = document.createElement("div");
 
-        mode.textContent = "Detection only";
+        mode.textContent = item.name === "Watch Ads option"
+            ? "Human approval required before selecting this option"
+            : "Detection only — manual interaction required";
 
         mode.style.color = "var(--yellow)";
 
