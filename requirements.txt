@@ -1,4 +1,6 @@
-fastapi==0.115.12
-uvicorn[standard]==0.34.2
-playwright==1.52.0
-pydantic==2.11.4
+fastapi
+uvicorn
+playwright==1.49.0
+playwright-stealth==1.0.6
+pydantic
+c==2.11.4
