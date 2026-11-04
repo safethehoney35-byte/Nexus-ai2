@@ -8,11 +8,13 @@ from playwright_stealth import stealth_async
 
 app = FastAPI()
 
+# Serving static assets from directory
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 class StealthRouteRequest(BaseModel):
     url: str
 
+# Production stealth profiles (Fully matching system fingerprints)
 STEALTH_METRIC_PROFILES = [
     {
         "os": "ios",
@@ -59,6 +61,10 @@ async def execute_behavioral_tunnel(page):
         fallback_pause = random.uniform(1.8, 3.4)
         await asyncio.sleep(fallback_pause)
         return fallback_pause
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
 
 @app.post("/api/run")
 async def process_stealth_pipeline(request: StealthRouteRequest):
