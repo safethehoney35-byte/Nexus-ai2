@@ -22,7 +22,8 @@ from privacy_shield import PrivacyShield
 APP_VERSION = "2.3.0"
 ACCESS_KEY = os.getenv("NEXUS_ACCESS_KEY", "").strip()
 MAX_ACTIONS = 5000
-ELEMENT_RETRY_INTERVAL = 0.25  # event-friendly polling; target discovery has no fixed deadline
+ELEMENT_RETRY_INTERVAL = 0.25  # retry cadence; full scans are optimized below
+TARGET_DETECTION_TIMEOUT = max(1.0, float(os.getenv("NEXUS_TARGET_TIMEOUT", "15")))
 LOG_LIMIT = 240
 HOST_VALIDATION_CACHE: dict[str, tuple[float, bool]] = {}
 
@@ -463,8 +464,10 @@ async def _element_info(locator):
       const ancestors=[]; let p=el.parentElement;
       const path=[]; let node=el;
       while(node && node.nodeType===1){
-        const siblings=node.parentElement ? Array.from(node.parentElement.children).filter(x=>x.tagName===node.tagName) : [node];
-        path.unshift(node.tagName.toLowerCase()+':'+siblings.indexOf(node));
+        const siblings=node.parentElement ? node.parentElement.children : null;
+        let sameTagIndex=0;
+        if(siblings){ for(let i=0;i<siblings.length;i++){ const sibling=siblings[i]; if(sibling===node) break; if(sibling.tagName===node.tagName) sameTagIndex++; } }
+        path.unshift(node.tagName.toLowerCase()+':'+sameTagIndex);
         node=node.parentElement;
       }
       while(p && ancestors.length<6){
@@ -542,6 +545,7 @@ async def _wait_recorded_gap(action: dict) -> bool:
 
 async def wait_for_recorded_target(action: dict):
     last_reason = "Target not present yet"
+    deadline = time.monotonic() + TARGET_DETECTION_TIMEOUT
     while not stop_event.is_set():
         if page is None or page.is_closed():
             return None, "Browser page closed while waiting for the recorded target"
@@ -549,8 +553,17 @@ async def wait_for_recorded_target(action: dict):
         if locator is not None:
             return locator, None
         last_reason = reason or last_reason
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None, (
+                f"Target not detected within {TARGET_DETECTION_TIMEOUT:g}s. "
+                f"Last check: {last_reason}"
+            )
         try:
-            await asyncio.wait_for(stop_event.wait(), timeout=ELEMENT_RETRY_INTERVAL)
+            await asyncio.wait_for(
+                stop_event.wait(),
+                timeout=min(ELEMENT_RETRY_INTERVAL, remaining)
+            )
         except asyncio.TimeoutError:
             pass
     return None, "Replay stopped while waiting for the recorded target: " + last_reason
@@ -690,11 +703,14 @@ async def run_replay(actions: list[dict]) -> None:
                     event_type="ACTION_DETECT", status="WORKED")
             try:
                 await locator.scroll_into_view_if_needed(timeout=0)
-                fresh, reason = await resolve_target(action)
-                if fresh is None:
-                    raise RuntimeError("Target changed before click: " + str(reason))
+                # Playwright locators are live: re-check this exact candidate rather than
+                # rescanning every selector in every frame a second time.
+                fresh_info = await _element_info(locator)
+                if (not fresh_info.get("visible") or fresh_info.get("disabled")
+                        or not fingerprint_matches(fresh_info, action.get("target") or {})):
+                    raise RuntimeError("Verified target changed before click; refusing to click.")
                 before = await page_snapshot()
-                await fresh.click(timeout=0, no_wait_after=True)
+                await locator.click(timeout=0, no_wait_after=True)
                 result["dispatched"] = True
                 result["status"] = "DISPATCHED"
                 state["success"] += 1
@@ -775,7 +791,7 @@ async def home():
 
 @app.get("/health")
 async def health():
-    return {"status":"healthy","app":"NEXUS Replay Engine","version":APP_VERSION,"recorder_compatibility":["nexus-recorder-3.x","pei-v3.2"],"browser_status":state["status"]}
+    return {"status":"healthy","app":"NEXUS Replay Engine","version":APP_VERSION,"recorder_compatibility":["nexus-recorder-3.x","pei-v3.2"],"browser_status":state["status"],"target_detection_timeout_s":TARGET_DETECTION_TIMEOUT,"element_retry_interval_s":ELEMENT_RETRY_INTERVAL}
 
 
 @app.get("/api/data")
