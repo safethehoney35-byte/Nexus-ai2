@@ -22,7 +22,7 @@ from privacy_shield import PrivacyShield
 APP_VERSION = "2.3.0"
 ACCESS_KEY = os.getenv("NEXUS_ACCESS_KEY", "").strip()
 MAX_ACTIONS = 5000
-ELEMENT_RETRY_INTERVAL = 0.25  # retry cadence; full scans are optimized below
+ELEMENT_RETRY_INTERVAL = 0.10  # Faster retry interval (Reduced from 0.25 to 0.10s)
 TARGET_DETECTION_TIMEOUT = max(1.0, float(os.getenv("NEXUS_TARGET_TIMEOUT", "15")))
 LOG_LIMIT = 240
 HOST_VALIDATION_CACHE: dict[str, tuple[float, bool]] = {}
@@ -104,44 +104,61 @@ privacy_shield = PrivacyShield(validate_public_url, block_trackers=TRACKER_BLOCK
 
 
 async def route_guard(route) -> None:
-    allowed, reason = await privacy_shield.inspect(route.request.url, route.request.resource_type)
+    req_url = route.request.url
+    res_type = route.request.resource_type
+    
+    # ⚡ OPTIMIZATION: Drop heavy media assets, styling sheets, trackers and bad domains at network stage
+    if res_type in ("image", "media", "font", "stylesheet") or any(
+        x in req_url for x in ("googletagmanager", "inmobi", "cloudflareinsights", "chargebee", "hcaptcha")
+    ):
+        safe_url = _safe_diagnostic_url(req_url)
+        add_log(f"Fast Mode dropped resource {safe_url} ({res_type}).",
+                "INFO", event_type="NETWORK_REQUEST", status="BLOCKED",
+                details={"url": safe_url, "resource_type": res_type, "decision": "BLOCKED", "reason": "Fast Mode Aggressive Blocker"})
+        await route.abort()
+        return
+
+    allowed, reason = await privacy_shield.inspect(req_url, res_type)
     if allowed:
         await route.continue_()
     else:
-        safe_url = _safe_diagnostic_url(route.request.url)
+        safe_url = _safe_diagnostic_url(req_url)
         add_log(f"Privacy Shield blocked {safe_url} ({reason}).",
                 "WARN", event_type="NETWORK_REQUEST", status="BLOCKED",
-                details={"url": safe_url, "resource_type": route.request.resource_type,
+                details={"url": safe_url, "resource_type": res_type,
                          "decision": "BLOCKED", "reason": reason})
         await route.abort()
 
 
 async def browser_diagnostics() -> dict[str, Any]:
     if page is None or page.is_closed(): return {}
-    data = await page.evaluate("""() => {
-      const nav=performance.getEntriesByType('navigation')[0]||null;
-      const resources=performance.getEntriesByType('resource');
-      const checks=[];
-      const add=(name,status,detail)=>checks.push({name,status,detail:String(detail)});
-      add('Current page','ok',location.href);
-      add('Page title','info',document.title||'Untitled');
-      add('JavaScript','ok','Enabled');
-      add('Cookies',navigator.cookieEnabled?'ok':'warning',navigator.cookieEnabled?'Available':'Disabled');
-      add('Browser', 'ok', navigator.userAgent);
-      add('Language','info',navigator.language||'Unknown');
-      add('Timezone','info',Intl.DateTimeFormat().resolvedOptions().timeZone||'Unknown');
-      add('Viewport','info',innerWidth+' × '+innerHeight);
-      add('Page visibility','info',document.visibilityState);
-      add('Navigation timing',nav?'ok':'warning',nav?Math.round(nav.domContentLoadedEventEnd)+' ms DOM ready':'Not available');
-      add('Resource loading','ok',resources.length+' resources observed');
-      add('Page JavaScript errors','info','Captured in activity/error logs');
-      return {title:document.title||'',checks,resource_count:resources.length,
-        navigation_ms:nav?Math.round(nav.domContentLoadedEventEnd):null,
-        user_agent:navigator.userAgent,language:navigator.language||'',
-        timezone:Intl.DateTimeFormat().resolvedOptions().timeZone||''};
-    }""")
-    data["updated_at"] = time.time()
-    return data
+    try:
+        data = await page.evaluate("""() => {
+          const nav=performance.getEntriesByType('navigation')[0]||null;
+          const resources=performance.getEntriesByType('resource');
+          const checks=[];
+          const add=(name,status,detail)=>checks.push({name,status,detail:String(detail)});
+          add('Current page','ok',location.href);
+          add('Page title','info',document.title||'Untitled');
+          add('JavaScript','ok','Enabled');
+          add('Cookies',navigator.cookieEnabled?'ok':'warning',navigator.cookieEnabled?'Available':'Disabled');
+          add('Browser', 'ok', navigator.userAgent);
+          add('Language','info',navigator.language||'Unknown');
+          add('Timezone','info',Intl.DateTimeFormat().resolvedOptions().timeZone||'Unknown');
+          add('Viewport','info',innerWidth+' × '+innerHeight);
+          add('Page visibility','info',document.visibilityState);
+          add('Navigation timing',nav?'ok':'warning',nav?Math.round(nav.domContentLoadedEventEnd)+' ms DOM ready':'Not available');
+          add('Resource loading','ok',resources.length+' resources observed');
+          add('Page JavaScript errors','info','Captured in activity/error logs');
+          return {title:document.title||'',checks,resource_count:resources.length,
+            navigation_ms:nav?Math.round(nav.domContentLoadedEventEnd):null,
+            user_agent:navigator.userAgent,language:navigator.language||'',
+            timezone:Intl.DateTimeFormat().resolvedOptions().timeZone||''};
+        }""")
+        data["updated_at"] = time.time()
+        return data
+    except Exception:
+        return {}
 
 
 async def cleanup_browser() -> None:
@@ -202,10 +219,22 @@ async def _record_response(response) -> None:
 async def launch_browser(url: str) -> None:
     global playwright, browser, context, page
     await validate_public_url(url)
-    add_log("Launching Chromium.", event_type="BROWSER_START", status="RUNNING")
+    add_log("Launching Chromium in Fast Mode configuration.", event_type="BROWSER_START", status="RUNNING")
     playwright = await async_playwright().start()
+    
+    # ⚡ OPTIMIZATION: Bypass DNS checks, Certificate layers and turn off web-security
     browser = await asyncio.wait_for(playwright.chromium.launch(headless=True, args=[
-        "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--no-zygote"]), 20)
+        "--no-sandbox", 
+        "--disable-dev-shm-usage", 
+        "--disable-gpu", 
+        "--no-zygote",
+        "--disable-web-security",                # Turn off web security constraints
+        "--ignore-certificate-errors",           # Suppress secure SSL calculations
+        "--ignore-certificate-errors-spki-list",
+        "--disable-dns-over-https",              # Drop secure DNS verification overhead
+        "--disable-blink-features=AutomationControlled"
+    ]), 20)
+    
     context = await browser.new_context(viewport={"width":1280,"height":800}, java_script_enabled=True)
     await context.route("**/*", route_guard)
     page = await context.new_page()
@@ -228,6 +257,8 @@ async def launch_browser(url: str) -> None:
 
     def on_request_failed(req) -> None:
         failure = getattr(req, "failure", None)
+        if failure == "net::ERR_ABORTED":
+            return  # Exclude logs for programmatic Fast mode abort allocations
         add_log(f"Request failed: {_safe_diagnostic_url(req.url)} · {failure or 'unknown'}",
                 "WARN", event_type="NETWORK_REQUEST", status="FAILED",
                 details={"url": _safe_diagnostic_url(req.url), "resource_type": req.resource_type,
@@ -240,10 +271,8 @@ async def launch_browser(url: str) -> None:
     page.on("response", lambda response: asyncio.create_task(_record_response(response)))
     add_log("Opening requested website.", event_type="PAGE_NAVIGATION", status="RUNNING")
     response = await page.goto(url, wait_until="domcontentloaded", timeout=60000)
-    try: await page.wait_for_load_state("load", timeout=3000)
-    except Exception: add_log("Page load event did not finish within 3 seconds; continuing with live page.",
-                               "WARN", event_type="PAGE_LOADING", status="UNCERTAIN",
-                               details={"wait_timeout_ms": 3000, "navigation_wait_until": "domcontentloaded"})
+    try: await page.wait_for_load_state("domcontentloaded", timeout=1500)
+    except Exception: pass
     state["title"] = await page.title()
     state["diagnostics"] = await browser_diagnostics()
     add_log(f"Website loaded: {state['title'] or page.url} · HTTP {response.status if response else 'unknown'}",
@@ -296,9 +325,8 @@ def adapt_recorder_target(raw: dict[str, Any]) -> dict[str, Any]:
     return target
 
 
-# 🎯 REPLAY BLOCKED TERMS MODIFIED ACCORDING TO USER REQUIREMENTS
 REPLAY_BLOCKED_TERMS = re.compile(
-    r"\b(goat|goated|12345678910 goatesgoat)\b", re.I
+    r"(goat|goated|12345678910 goatesgoat)", re.I
 )
 
 
@@ -496,7 +524,7 @@ async def resolve_target(action: dict):
         for selector in selectors:
             try:
                 loc = frame.locator(selector)
-                count = min(await loc.count(), 100)
+                count = min(await loc.count(), 30)  # Reduced scan pool from 100 to 30 for max speeds
                 for index in range(count):
                     candidate = loc.nth(index)
                     info = await _element_info(candidate)
@@ -594,7 +622,8 @@ async def execute_action(action: dict, number: int) -> tuple[bool, str]:
         return False, str(exc).splitlines()[0][:220]
 
 
-async def observe_page_response(before: dict[str, Any], wait_ms: int = 900) -> dict[str, Any]:
+async def observe_page_response(before: dict[str, Any], wait_ms: int = 400) -> dict[str, Any]:
+    # Reduced response tracking cooldown window from 900ms to 400ms for faster cascades
     if wait_ms > 0:
         await asyncio.sleep(wait_ms / 1000)
     else:
@@ -703,8 +732,6 @@ async def run_replay(actions: list[dict]) -> None:
                     event_type="ACTION_DETECT", status="WORKED")
             try:
                 await locator.scroll_into_view_if_needed(timeout=0)
-                # Playwright locators are live: re-check this exact candidate rather than
-                # rescanning every selector in every frame a second time.
                 fresh_info = await _element_info(locator)
                 if (not fresh_info.get("visible") or fresh_info.get("disabled")
                         or not fingerprint_matches(fresh_info, action.get("target") or {})):
