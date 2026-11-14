@@ -17,13 +17,13 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from playwright.async_api import async_playwright, Error as PlaywrightError
-from privacy_shield import PrivacyShield
 
-APP_VERSION = "2.3.0"
+APP_VERSION = "2.3.1"
 ACCESS_KEY = os.getenv("NEXUS_ACCESS_KEY", "").strip()
 MAX_ACTIONS = 5000
-ELEMENT_RETRY_INTERVAL = 0.10  # Faster retry interval (Reduced from 0.25 to 0.10s)
-TARGET_DETECTION_TIMEOUT = max(1.0, float(os.getenv("NEXUS_TARGET_TIMEOUT", "15")))
+ELEMENT_RETRY_INTERVAL = 0.25  # responsive, low-CPU target polling
+ELEMENT_WAIT_TIMEOUT_SECONDS = max(3, min(120, int(os.getenv("NEXUS_ELEMENT_WAIT_SECONDS", "20"))))
+MAX_SELECTOR_CANDIDATES = 250
 LOG_LIMIT = 240
 HOST_VALIDATION_CACHE: dict[str, tuple[float, bool]] = {}
 
@@ -32,6 +32,7 @@ state: dict[str, Any] = {
     "started_at": None, "actions_total": 0, "actions_done": 0,
     "success": 0, "failed": 0, "current_action": None,
     "diagnostics": {}, "activity": [], "errors": [], "events": [],
+    "detection_metrics": {"attempts": 0, "elapsed_ms": 0, "last_scan_ms": 0},
     "session_id": None, "replay_running": False, "verified": 0,
     "action_results": [], "run_started_at": None, "run_elapsed_ms": 0,
 }
@@ -98,67 +99,48 @@ async def validate_public_url(value: str) -> str:
         raise
 
 
-TRACKER_BLOCKING = os.getenv("NEXUS_BLOCK_TRACKERS", "true").strip().lower() not in {"0", "false", "no", "off"}
-privacy_shield = PrivacyShield(validate_public_url, block_trackers=TRACKER_BLOCKING,
-    extra_tracker_domains={x.strip().lower() for x in os.getenv("NEXUS_EXTRA_TRACKERS", "").split(",") if x.strip()})
-
-
-async def route_guard(route) -> None:
-    req_url = route.request.url
-    res_type = route.request.resource_type
-    
-    # ⚡ OPTIMIZATION: Drop heavy media assets, styling sheets, trackers and bad domains at network stage
-    if res_type in ("image", "media", "font", "stylesheet") or any(
-        x in req_url for x in ("googletagmanager", "inmobi", "cloudflareinsights", "chargebee", "hcaptcha")
-    ):
-        safe_url = _safe_diagnostic_url(req_url)
-        add_log(f"Fast Mode dropped resource {safe_url} ({res_type}).",
-                "INFO", event_type="NETWORK_REQUEST", status="BLOCKED",
-                details={"url": safe_url, "resource_type": res_type, "decision": "BLOCKED", "reason": "Fast Mode Aggressive Blocker"})
+async def route_public_url_guard(route) -> None:
+    """Keep SSRF protection for every browser request without tracker blocking."""
+    request_url = route.request.url
+    try:
+        await validate_public_url(request_url)
+    except ValueError as exc:
+        safe_url = _safe_diagnostic_url(request_url)
+        add_log(f"Blocked non-public or invalid network request {safe_url}: {exc}",
+                "WARN", event_type="NETWORK_REQUEST", status="BLOCKED",
+                details={"url": safe_url, "resource_type": route.request.resource_type,
+                         "decision": "BLOCKED", "reason": str(exc)})
         await route.abort()
         return
-
-    allowed, reason = await privacy_shield.inspect(req_url, res_type)
-    if allowed:
-        await route.continue_()
-    else:
-        safe_url = _safe_diagnostic_url(req_url)
-        add_log(f"Privacy Shield blocked {safe_url} ({reason}).",
-                "WARN", event_type="NETWORK_REQUEST", status="BLOCKED",
-                details={"url": safe_url, "resource_type": res_type,
-                         "decision": "BLOCKED", "reason": reason})
-        await route.abort()
+    await route.continue_()
 
 
 async def browser_diagnostics() -> dict[str, Any]:
     if page is None or page.is_closed(): return {}
-    try:
-        data = await page.evaluate("""() => {
-          const nav=performance.getEntriesByType('navigation')[0]||null;
-          const resources=performance.getEntriesByType('resource');
-          const checks=[];
-          const add=(name,status,detail)=>checks.push({name,status,detail:String(detail)});
-          add('Current page','ok',location.href);
-          add('Page title','info',document.title||'Untitled');
-          add('JavaScript','ok','Enabled');
-          add('Cookies',navigator.cookieEnabled?'ok':'warning',navigator.cookieEnabled?'Available':'Disabled');
-          add('Browser', 'ok', navigator.userAgent);
-          add('Language','info',navigator.language||'Unknown');
-          add('Timezone','info',Intl.DateTimeFormat().resolvedOptions().timeZone||'Unknown');
-          add('Viewport','info',innerWidth+' × '+innerHeight);
-          add('Page visibility','info',document.visibilityState);
-          add('Navigation timing',nav?'ok':'warning',nav?Math.round(nav.domContentLoadedEventEnd)+' ms DOM ready':'Not available');
-          add('Resource loading','ok',resources.length+' resources observed');
-          add('Page JavaScript errors','info','Captured in activity/error logs');
-          return {title:document.title||'',checks,resource_count:resources.length,
-            navigation_ms:nav?Math.round(nav.domContentLoadedEventEnd):null,
-            user_agent:navigator.userAgent,language:navigator.language||'',
-            timezone:Intl.DateTimeFormat().resolvedOptions().timeZone||''};
-        }""")
-        data["updated_at"] = time.time()
-        return data
-    except Exception:
-        return {}
+    data = await page.evaluate("""() => {
+      const nav=performance.getEntriesByType('navigation')[0]||null;
+      const resources=performance.getEntriesByType('resource');
+      const checks=[];
+      const add=(name,status,detail)=>checks.push({name,status,detail:String(detail)});
+      add('Current page','ok',location.href);
+      add('Page title','info',document.title||'Untitled');
+      add('JavaScript','ok','Enabled');
+      add('Cookies',navigator.cookieEnabled?'ok':'warning',navigator.cookieEnabled?'Available':'Disabled');
+      add('Browser', 'ok', navigator.userAgent);
+      add('Language','info',navigator.language||'Unknown');
+      add('Timezone','info',Intl.DateTimeFormat().resolvedOptions().timeZone||'Unknown');
+      add('Viewport','info',innerWidth+' × '+innerHeight);
+      add('Page visibility','info',document.visibilityState);
+      add('Navigation timing',nav?'ok':'warning',nav?Math.round(nav.domContentLoadedEventEnd)+' ms DOM ready':'Not available');
+      add('Resource loading','ok',resources.length+' resources observed');
+      add('Page JavaScript errors','info','Captured in activity/error logs');
+      return {title:document.title||'',checks,resource_count:resources.length,
+        navigation_ms:nav?Math.round(nav.domContentLoadedEventEnd):null,
+        user_agent:navigator.userAgent,language:navigator.language||'',
+        timezone:Intl.DateTimeFormat().resolvedOptions().timeZone||''};
+    }""")
+    data["updated_at"] = time.time()
+    return data
 
 
 async def cleanup_browser() -> None:
@@ -219,24 +201,11 @@ async def _record_response(response) -> None:
 async def launch_browser(url: str) -> None:
     global playwright, browser, context, page
     await validate_public_url(url)
-    add_log("Launching Chromium in Fast Mode configuration.", event_type="BROWSER_START", status="RUNNING")
+    add_log("Launching Chromium.", event_type="BROWSER_START", status="RUNNING")
     playwright = await async_playwright().start()
-    
-    # ⚡ OPTIMIZATION: Bypass DNS checks, Certificate layers and turn off web-security
     browser = await asyncio.wait_for(playwright.chromium.launch(headless=True, args=[
-        "--no-sandbox", 
-        "--disable-dev-shm-usage", 
-        "--disable-gpu", 
-        "--no-zygote",
-        "--disable-web-security",                # Turn off web security constraints
-        "--ignore-certificate-errors",           # Suppress secure SSL calculations
-        "--ignore-certificate-errors-spki-list",
-        "--disable-dns-over-https",              # Drop secure DNS verification overhead
-        "--disable-blink-features=AutomationControlled"
-    ]), 20)
-    
+        "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--no-zygote"]), 20)
     context = await browser.new_context(viewport={"width":1280,"height":800}, java_script_enabled=True)
-    await context.route("**/*", route_guard)
     page = await context.new_page()
 
     def on_page_error(exc) -> None:
@@ -257,8 +226,6 @@ async def launch_browser(url: str) -> None:
 
     def on_request_failed(req) -> None:
         failure = getattr(req, "failure", None)
-        if failure == "net::ERR_ABORTED":
-            return  # Exclude logs for programmatic Fast mode abort allocations
         add_log(f"Request failed: {_safe_diagnostic_url(req.url)} · {failure or 'unknown'}",
                 "WARN", event_type="NETWORK_REQUEST", status="FAILED",
                 details={"url": _safe_diagnostic_url(req.url), "resource_type": req.resource_type,
@@ -271,8 +238,8 @@ async def launch_browser(url: str) -> None:
     page.on("response", lambda response: asyncio.create_task(_record_response(response)))
     add_log("Opening requested website.", event_type="PAGE_NAVIGATION", status="RUNNING")
     response = await page.goto(url, wait_until="domcontentloaded", timeout=60000)
-    try: await page.wait_for_load_state("domcontentloaded", timeout=1500)
-    except Exception: pass
+    # Avoid waiting for images, fonts and third-party resources after DOM is ready.
+    # Late targets are resolved on demand by wait_for_recorded_target().
     state["title"] = await page.title()
     state["diagnostics"] = await browser_diagnostics()
     add_log(f"Website loaded: {state['title'] or page.url} · HTTP {response.status if response else 'unknown'}",
@@ -307,7 +274,7 @@ def adapt_recorder_target(raw: dict[str, Any]) -> dict[str, Any]:
         candidates = source.get("selectorCandidates")
         if isinstance(candidates, list):
             selectors.extend(str(x).strip() for x in candidates if isinstance(x, str) and x.strip())
-        for key in ("uniqueSelector", "selector", "cssPath"):
+        for key in ("uniqueSelector", "selector", "cssPath", "path"):
             value = source.get(key)
             if isinstance(value, str) and value.strip():
                 selectors.append(value.strip())
@@ -325,8 +292,12 @@ def adapt_recorder_target(raw: dict[str, Any]) -> dict[str, Any]:
     return target
 
 
+# Keep the project's documented baseline policy for ad/reward, payment,
+# financial-transfer, and destructive controls. This is not a general site block.
 REPLAY_BLOCKED_TERMS = re.compile(
-    r"(goat|goated|12345678910 goatesgoat)", re.I
+    r"\b(payment|pay now|purchase|checkout|"
+    r"delete|remove account|transfer|withdraw|payout|"
+    r"ad|ads|advertisement|reward|rewards)\b", re.I
 )
 
 
@@ -358,6 +329,16 @@ def replay_block_reason(action: dict[str, Any]) -> str | None:
         attrs.get("data-testid"), attrs.get("data-test"), attrs.get("data-qa"),
         attrs.get("aria-label"), attrs.get("href"),
     ]
+    context = target.get("context") if isinstance(target.get("context"), dict) else {}
+    ancestors = context.get("ancestors") if isinstance(context.get("ancestors"), list) else []
+    for ancestor in ancestors[:8]:
+        if not isinstance(ancestor, dict):
+            continue
+        pieces.extend([
+            ancestor.get("text"), ancestor.get("id"), ancestor.get("testId"),
+            ancestor.get("role"),
+            " ".join(ancestor.get("classes", [])) if isinstance(ancestor.get("classes"), list) else "",
+        ])
     label = " ".join(str(x or "") for x in pieces)
     match = REPLAY_BLOCKED_TERMS.search(label)
     if match:
@@ -372,6 +353,7 @@ def _normal_text(value: Any) -> str:
 async def inspect_workflow_targets(actions: list[dict]) -> list[dict]:
     reports = []
     for number, action in enumerate(actions, 1):
+        scan_started = time.monotonic()
         target = adapt_recorder_target(action.get("target") or {})
         selectors = target.get("_nexus_selectors", [])
         candidates, seen = [], set()
@@ -379,7 +361,7 @@ async def inspect_workflow_targets(actions: list[dict]) -> list[dict]:
             for selector in selectors:
                 try:
                     loc = frame.locator(selector)
-                    count = min(await loc.count(), 100)
+                    count = min(await loc.count(), MAX_SELECTOR_CANDIDATES)
                     for idx in range(count):
                         el = loc.nth(idx)
                         info = await _element_info(el)
@@ -415,6 +397,7 @@ async def inspect_workflow_targets(actions: list[dict]) -> list[dict]:
                 pass
         reports.append({
             "number": number,
+            "scan_elapsed_ms": round((time.monotonic() - scan_started) * 1000),
             "label": str(target.get("text") or target.get("ariaLabel") or target.get("id") or target.get("tag") or "target")[:100],
             "candidate_count": len(candidates),
             "visible_enabled_count": len(eligible),
@@ -429,39 +412,85 @@ async def inspect_workflow_targets(actions: list[dict]) -> list[dict]:
 
 
 def fingerprint_matches(el: dict, target: dict) -> bool:
+    """Tolerant, weighted PEI matching.
+
+    A few independent signals can identify a target; stale classes or changed
+    optional attributes no longer veto an otherwise good match. The minimum
+    score and anchor requirement prevent tag-only/weak matches from clicking.
+    Ambiguous matches are still rejected by resolve_target().
+    """
     attrs = target.get("_nexus_attrs") if isinstance(target.get("_nexus_attrs"), dict) else {}
-    expected_fields = (
-        ("tag", target.get("tag")),
-        ("id", target.get("id") or attrs.get("id")),
-        ("testId", target.get("testId") or attrs.get("data-testid") or attrs.get("data-test") or attrs.get("data-qa")),
-        ("ariaLabel", target.get("ariaLabel") or attrs.get("aria-label")),
-        ("name", target.get("name") or attrs.get("name")),
-        ("role", target.get("role") or attrs.get("role")),
+    live_attrs = el.get("attrs") if isinstance(el.get("attrs"), dict) else {}
+    score = 0
+    strong_anchor = False
+
+    # Strong identity signals. Missing or changed values reduce the score,
+    # rather than making the whole fingerprint fail immediately.
+    identity_fields = (
+        ("id", target.get("id") or attrs.get("id"), 10),
+        ("testId", target.get("testId") or attrs.get("data-testid") or attrs.get("data-test") or attrs.get("data-qa"), 10),
+        ("ariaLabel", target.get("ariaLabel") or attrs.get("aria-label"), 8),
+        ("name", target.get("name") or attrs.get("name"), 7),
     )
-    for key, expected in expected_fields:
-        if expected and _normal_text(el.get(key)) != _normal_text(expected):
-            return False
+    for key, expected, weight in identity_fields:
+        if expected:
+            actual = el.get(key)
+            if actual and _normal_text(actual) == _normal_text(expected):
+                score += weight
+                strong_anchor = True
+
+    expected_tag = _normal_text(target.get("tag"))
+    actual_tag = _normal_text(el.get("tag"))
+    tag_match = bool(expected_tag and actual_tag and expected_tag == actual_tag)
+    if tag_match:
+        score += 2
+
+    expected_role = _normal_text(target.get("role") or attrs.get("role"))
+    actual_role = _normal_text(el.get("role"))
+    if expected_role and actual_role and expected_role == actual_role:
+        score += 3
 
     expected_text = _normal_text(target.get("text"))
     actual_text = _normal_text(el.get("text"))
-    if expected_text and expected_text not in actual_text:
-        return False
+    text_match = False
+    if expected_text and actual_text:
+        if expected_text == actual_text:
+            score += 7
+            text_match = True
+        elif len(expected_text) >= 3 and expected_text in actual_text:
+            score += 5
+            text_match = True
+        elif len(actual_text) >= 3 and actual_text in expected_text:
+            score += 3
+            text_match = True
 
-    live_attrs = el.get("attrs") if isinstance(el.get("attrs"), dict) else {}
-    for attr_name in ("type", "role", "placeholder", "title", "alt", "href"):
+    # Optional attributes: matching adds evidence; changed values do not veto
+    # other independent matches (dynamic hrefs/placeholders are common).
+    for attr_name, weight in (("type", 3), ("placeholder", 4), ("title", 3),
+                              ("alt", 3), ("href", 4)):
         expected = attrs.get(attr_name)
         actual = live_attrs.get(attr_name)
-        if expected and actual is not None and _normal_text(expected) != _normal_text(actual):
-            return False
-    expected_class = set(str(attrs.get("class") or "").split())
-    actual_class = set(str(live_attrs.get("class") or "").split())
-    if expected_class and not expected_class.issubset(actual_class):
-        return False
+        if expected and actual and _normal_text(expected) == _normal_text(actual):
+            score += weight
+
+    expected_classes = set(str(attrs.get("class") or "").split())
+    actual_classes = set(str(live_attrs.get("class") or "").split())
+    if expected_classes and actual_classes:
+        score += min(2, len(expected_classes & actual_classes))
+
     expected_data = attrs.get("dataAttributes") if isinstance(attrs.get("dataAttributes"), dict) else {}
+    data_matches = 0
     for key, value in expected_data.items():
-        if live_attrs.get("data-" + str(key).removeprefix("data-")) != value:
-            return False
-    return True
+        actual = live_attrs.get("data-" + str(key).removeprefix("data-"))
+        if actual is not None and _normal_text(actual) == _normal_text(value):
+            data_matches += 1
+    score += min(4, data_matches * 2)
+
+    # Do not accept generic elements based only on a tag/role or one weak
+    # attribute. Require either a strong identity, or text + tag, or several
+    # independent secondary signals.
+    has_anchor = strong_anchor or (text_match and tag_match) or score >= 10
+    return score >= 7 and has_anchor
 
 
 def _context_score(el: dict, target: dict) -> int:
@@ -492,10 +521,8 @@ async def _element_info(locator):
       const ancestors=[]; let p=el.parentElement;
       const path=[]; let node=el;
       while(node && node.nodeType===1){
-        const siblings=node.parentElement ? node.parentElement.children : null;
-        let sameTagIndex=0;
-        if(siblings){ for(let i=0;i<siblings.length;i++){ const sibling=siblings[i]; if(sibling===node) break; if(sibling.tagName===node.tagName) sameTagIndex++; } }
-        path.unshift(node.tagName.toLowerCase()+':'+sameTagIndex);
+        const siblings=node.parentElement ? Array.from(node.parentElement.children).filter(x=>x.tagName===node.tagName) : [node];
+        path.unshift(node.tagName.toLowerCase()+':'+siblings.indexOf(node));
         node=node.parentElement;
       }
       while(p && ancestors.length<6){
@@ -524,7 +551,7 @@ async def resolve_target(action: dict):
         for selector in selectors:
             try:
                 loc = frame.locator(selector)
-                count = min(await loc.count(), 30)  # Reduced scan pool from 100 to 30 for max speeds
+                count = min(await loc.count(), MAX_SELECTOR_CANDIDATES)
                 for index in range(count):
                     candidate = loc.nth(index)
                     info = await _element_info(candidate)
@@ -573,25 +600,29 @@ async def _wait_recorded_gap(action: dict) -> bool:
 
 async def wait_for_recorded_target(action: dict):
     last_reason = "Target not present yet"
-    deadline = time.monotonic() + TARGET_DETECTION_TIMEOUT
+    attempts = 0
+    started = time.monotonic()
     while not stop_event.is_set():
         if page is None or page.is_closed():
             return None, "Browser page closed while waiting for the recorded target"
+        scan_started = time.monotonic()
         locator, reason = await resolve_target(action)
+        scan_ms = round((time.monotonic() - scan_started) * 1000)
+        attempts += 1
+        last_reason = reason or last_reason
+        state["detection_metrics"] = {
+            "attempts": attempts,
+            "elapsed_ms": round((time.monotonic() - started) * 1000),
+            "last_scan_ms": scan_ms,
+        }
         if locator is not None:
             return locator, None
-        last_reason = reason or last_reason
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            return None, (
-                f"Target not detected within {TARGET_DETECTION_TIMEOUT:g}s. "
-                f"Last check: {last_reason}"
-            )
+        if time.monotonic() - started >= ELEMENT_WAIT_TIMEOUT_SECONDS:
+            return None, (f"Target was not found after {ELEMENT_WAIT_TIMEOUT_SECONDS}s "
+                          f"({attempts} scans). Last result: {last_reason}")
+        # Keep cancellation responsive without repeatedly hammering the DOM.
         try:
-            await asyncio.wait_for(
-                stop_event.wait(),
-                timeout=min(ELEMENT_RETRY_INTERVAL, remaining)
-            )
+            await asyncio.wait_for(stop_event.wait(), timeout=ELEMENT_RETRY_INTERVAL)
         except asyncio.TimeoutError:
             pass
     return None, "Replay stopped while waiting for the recorded target: " + last_reason
@@ -622,8 +653,7 @@ async def execute_action(action: dict, number: int) -> tuple[bool, str]:
         return False, str(exc).splitlines()[0][:220]
 
 
-async def observe_page_response(before: dict[str, Any], wait_ms: int = 400) -> dict[str, Any]:
-    # Reduced response tracking cooldown window from 900ms to 400ms for faster cascades
+async def observe_page_response(before: dict[str, Any], wait_ms: int = 900) -> dict[str, Any]:
     if wait_ms > 0:
         await asyncio.sleep(wait_ms / 1000)
     else:
@@ -712,7 +742,9 @@ async def run_replay(actions: list[dict]) -> None:
             if not await _wait_recorded_gap(action):
                 result["status"] = "STOPPED"
                 break
+            state["detection_metrics"] = {"attempts": 0, "elapsed_ms": 0, "last_scan_ms": 0}
             locator, last_reason = await wait_for_recorded_target(action)
+            result["detection"] = dict(state["detection_metrics"])
             if stop_event.is_set():
                 result["status"] = "STOPPED"
                 result["error"] = last_reason
@@ -732,12 +764,11 @@ async def run_replay(actions: list[dict]) -> None:
                     event_type="ACTION_DETECT", status="WORKED")
             try:
                 await locator.scroll_into_view_if_needed(timeout=0)
-                fresh_info = await _element_info(locator)
-                if (not fresh_info.get("visible") or fresh_info.get("disabled")
-                        or not fingerprint_matches(fresh_info, action.get("target") or {})):
-                    raise RuntimeError("Verified target changed before click; refusing to click.")
+                fresh, reason = await resolve_target(action)
+                if fresh is None:
+                    raise RuntimeError("Target changed before click: " + str(reason))
                 before = await page_snapshot()
-                await locator.click(timeout=0, no_wait_after=True)
+                await fresh.click(timeout=0, no_wait_after=True)
                 result["dispatched"] = True
                 result["status"] = "DISPATCHED"
                 state["success"] += 1
@@ -818,13 +849,13 @@ async def home():
 
 @app.get("/health")
 async def health():
-    return {"status":"healthy","app":"NEXUS Replay Engine","version":APP_VERSION,"recorder_compatibility":["nexus-recorder-3.x","pei-v3.2"],"browser_status":state["status"],"target_detection_timeout_s":TARGET_DETECTION_TIMEOUT,"element_retry_interval_s":ELEMENT_RETRY_INTERVAL}
+    return {"status":"healthy","app":"NEXUS Replay Engine","version":APP_VERSION,"recorder_compatibility":["nexus-unique-recorder-2.0.0","nexus-recorder-3.x","pei-v3.2"],"browser_status":state["status"]}
 
 
 @app.get("/api/data")
 async def get_data(x_nexus_key: str | None = Header(default=None)):
     require_key(x_nexus_key)
-    return {**state, "privacy_shield":privacy_shield.snapshot()}
+    return state
 
 
 @app.post("/api/start")
@@ -840,7 +871,9 @@ async def start(req: StartRequest, x_nexus_key: str | None = Header(default=None
         stop_event.clear()
         state.update(status="STARTING",url=req.url,title="",message="Opening website...",
                      actions_total=0,actions_done=0,success=0,verified=0,failed=0,current_action=None,
-                     action_results=[],run_elapsed_ms=0,diagnostics={},started_at=time.time(),session_id=str(uuid.uuid4()))
+                     action_results=[],run_elapsed_ms=0,diagnostics={},
+                     detection_metrics={"attempts":0,"elapsed_ms":0,"last_scan_ms":0},
+                     started_at=time.time(),session_id=str(uuid.uuid4()))
         try:
             await launch_browser(req.url)
         except Exception as exc:

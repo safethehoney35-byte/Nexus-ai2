@@ -1,44 +1,58 @@
-# NEXUS AI Browser Monitor 1.0
+# NEXUS Replay Engine 2.3.1
 
-FastAPI + Playwright single-session browser monitor. The canonical backend is
-`app/main.py`; the dashboard is `static/index.html`.
+NEXUS is a single-session FastAPI + Playwright browser replay service.
 
-## Features
-- Compact URL / Start / Stop dashboard
-- Browser state, detected controls, activity and error logs
-- Explicit approval before eligible ordinary button/link clicks
-- Read-only detection of Linkvertise/ad/reward selectors
-- `NEXUS_ACCESS_KEY` protection for browser-control and data APIs
-- Legacy `/automation/nexus-bypass` and `/ws` routes retained for compatibility
+## Recorder formats
 
-## Safety boundaries
-Ad viewing, skipping ads, reward claiming/completion, payment, account deletion,
-transfers and withdrawals are not automated. Ad/reward selectors are detection-only.
-The approval endpoint re-checks the live element before an eligible ordinary click.
+- Accepts NEXUS Recorder V3 `actions[]` exports.
+- Also accepts `NEXUS-UNIQUE-RECORDER` v2.0.0 `events[]` exports and converts click events to the engine's click-action shape.
+- The current replay engine supports click actions only. Other event types are reported as skipped.
+- V2 event timestamps are used to preserve the recorded inter-click gaps. Target fingerprints, attributes, ancestor context, CSS paths, and page URLs are carried into the normalized action.
+
+The importer does not make a workflow safe merely because it can parse it. The documented baseline policy still blocks ad/reward, payment, financial-transfer, and destructive controls. In particular, use a normal demo site for replay testing rather than an advertising/reward gate.
+
+## Recommended test sites
+
+1. `https://demo.playwright.dev/todomvc/` — typing, adding items, toggling and deleting demo todo items.
+2. `https://the-internet.herokuapp.com/` — buttons, checkboxes, dropdowns, dynamic loading and alerts.
+3. `https://www.saucedemo.com/` — a demo shopping workflow using its documented test account.
+
+## Runtime behavior
+
+- Docker starts `uvicorn main:app`; `main.py` and `static/index.html` are the active application files.
+- The UI polls `/api/data` every 1.4 seconds for status updates. This is dashboard refresh, not the replay scanner.
+- Replay target lookup retries every 250 ms, up to `NEXUS_ELEMENT_WAIT_SECONDS` (default 20 seconds, bounded 3–120 seconds).
+- Navigation waits for `domcontentloaded` and does not wait for all images, fonts, or third-party resources.
+- The service uses one in-memory browser session. Keep one Render instance; multiple instances do not share the browser state.
 
 ## Render deployment
-1. Push this repository structure to GitHub.
-2. Keep the existing Render Docker service.
-3. Ensure Render Environment contains `NEXUS_ACCESS_KEY` with a long unique secret.
-4. Deploy the latest commit.
-5. Check `/health`, then open the dashboard and enter the same access key.
 
-The Dockerfile starts `uvicorn app.main:app` and uses Render's `$PORT`.
-Do not change the start command to `main:app`.
+1. Back up the current repository.
+2. Replace the deployed project with this cleaned project.
+3. Set `NEXUS_ACCESS_KEY` in Render Environment.
+4. Keep the service at one instance.
+5. Deploy and confirm `/health` reports version `2.3.1`.
 
 ## Local run
+
 ```bash
+python -m venv .venv
+. .venv/bin/activate
 pip install -r requirements.txt
 playwright install chromium
-export NEXUS_ACCESS_KEY='your-long-random-secret'
-uvicorn app.main:app --host 127.0.0.1 --port 8000
+export NEXUS_ACCESS_KEY='replace-with-a-long-random-secret'
+uvicorn main:app --host 127.0.0.1 --port 8000
 ```
 
-## Endpoints
-- `GET /` and `GET /automation/nexus-bypass` — dashboard
-- `GET /health` — public health check
-- `GET /api/status`, `GET /api/data` — access-key protected
-- `POST /api/start`, `/api/stop`, `/api/approve`, `/api/reject` — protected
-- `WS /ws` — legacy heartbeat/scan compatibility
+Open `http://127.0.0.1:8000`.
 
-Send `X-Nexus-Key: <NEXUS_ACCESS_KEY>` with protected API requests.
+## API
+
+- `GET /health` — public health check
+- `GET /api/data` — authenticated runtime state
+- `POST /api/start` — `{"url":"https://example.com"}`
+- `POST /api/inspect` — inspect normalized click actions
+- `POST /api/replay` — replay normalized click actions
+- `POST /api/stop` — stop the browser and replay
+
+Authenticated requests require `X-Nexus-Key: <NEXUS_ACCESS_KEY>`.
